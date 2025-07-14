@@ -21,7 +21,7 @@ router.post('/update', async (req, res) => {
     updateSchema.parse(req.body);
     await sendUpdateMessage(req.body);
     res.status(202).json({ message: 'Update queued' });
- res.status(202).json({ message: '✅ data queued' });
+ 
   } catch (err) {
     console.error('Update error:', err);
     res.status(400).json({ message: err.errors?.[0]?.message || 'Validation failed' });
