@@ -8,7 +8,7 @@
 function setSecretTokenFromBackend(secret, backendApiUrl) {
   const scriptProperties = PropertiesService.getScriptProperties();
   scriptProperties.setProperty('API_SECRET_TOKEN', secret);
-  scriptProperties.setProperty('BACKEND_API_URL', backendApiUrl);
+  scriptProperties.setProperty('API_BASE_URL', backendApiUrl);
   Logger.log('Successfully set API secret and backend URL.');
 }
 
