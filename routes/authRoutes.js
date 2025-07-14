@@ -38,7 +38,7 @@ router.get('/google', (req, res) => {
         prompt: 'consent', 
         state
     });
-
+    res.status(202).json({ message: 'redirected' });
     res.redirect(authUrl);
 });
 
