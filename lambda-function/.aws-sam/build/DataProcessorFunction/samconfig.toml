@@ -1,0 +1,12 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "Google-ai-data"
+resolve_s3 = true
+s3_prefix = "Google-ai-data"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+disable_rollback = true
+parameter_overrides = "BulkImportQueueArn=\"arn:aws:sqs:us-east-1:157489952161:sqs1\" UpdateQueueArn=\"arn:aws:sqs:us-east-1:157489952161:sqs2\" DbName=\"GoogleSheetData\" ProcessedDataCollection=\"processed_rows\" GroqModel=\"llama3-8b-8192\""
+image_repositories = []

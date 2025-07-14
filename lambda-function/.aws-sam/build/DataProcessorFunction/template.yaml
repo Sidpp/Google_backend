@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Deploys a Lambda function triggered by two SQS queues to process
+  Google Sheet data using Groq for AI predictions.
+
+Parameters:
+  # --- SQS Queue ARNs ---
+  BulkImportQueueArn:
+    Type: String
+    Description: The ARN of the SQS queue for bulk data imports.
+  UpdateQueueArn:
+    Type: String
+    Description: The ARN of the SQS queue for on-edit updates.
+
+  # --- Secrets and Configuration (Updated for Groq) ---
+  MongoUri:
+    Type: String
+    NoEcho: true
+    Description: The connection string for MongoDB.
+  DbName:
+    Type: String
+    Description: The name of the MongoDB database.
+    Default: "GoogleSheetData"
+  ProcessedDataCollection:
+    Type: String
+    Description: The name of the collection to store processed data.
+    Default: "processed_rows"
+  GroqApiKey: # CHANGED
+    Type: String
+    NoEcho: true
+    Description: The API key for Groq.
+  GroqModel: # NEW
+    Type: String
+    Description: The model to use for Groq predictions.
+    Default: "llama3-8b-8192"
+
+
+Resources:
+  DataProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GoogleSheetDataProcessor
+      Description: Processes Google Sheet data from SQS, enriches it with Groq, and stores it.
+      CodeUri: .
+      Handler: handler.handler
+      Runtime: nodejs20.x
+      MemorySize: 256
+      Timeout: 90
+      Environment:
+        Variables:
+          MONGO_URI: !Ref MongoUri
+          DB_NAME: !Ref DbName
+          PROCESSED_DATA_COLLECTION: !Ref ProcessedDataCollection
+          GROQ_API_KEY: !Ref GroqApiKey # CHANGED
+          GROQ_MODEL: !Ref GroqModel   # NEW
+      Events:
+        SQSEventBulk: # Renamed for clarity
+          Type: SQS
+          Properties:
+            Queue: !Ref BulkImportQueueArn
+            BatchSize: 10
+            Enabled: true
+        SQSEventUpdate: # Renamed for clarity
+          Type: SQS
+          Properties:
+            Queue: !Ref UpdateQueueArn
+            BatchSize: 5
+            Enabled: true
+
+Outputs:
+  FunctionName:
+    Description: "The name of the created Lambda function"
+    Value: !Ref DataProcessorFunction

@@ -1,0 +1,13 @@
+{
+  "name": "lambda-processor",
+  "version": "1.0.0",
+  "description": "Lambda function to process Google Sheet data.",
+  "type": "module",
+  "main": "handler.js",
+  "dependencies": {
+    "openai": "^4.0.0",
+    "zod": "^3.22.0",
+    "mongodb": "^6.0.0",
+    "ts-dedent": "^2.2.0"
+  }
+}
