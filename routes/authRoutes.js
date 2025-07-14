@@ -77,7 +77,7 @@ router.get('/google/callback', async (req, res) => {
         oauth2Client.setCredentials(tokens);
         console.log("Successfully retrieved OAuth tokens.");
 
-        res.send("✅ Success! Your Google Sheet is being connected in the background. You can close this window. Check your sheet for the 'API Sync' menu in a minute.");
+        res.redirect("https://mnr-pmo-vue.vercel.app/dashboard/settings/profile");
 
         (async () => {
             try {
@@ -118,17 +118,9 @@ router.get('/google/callback', async (req, res) => {
                 console.log("Successfully validated and sent data to SQS.");
 
                 const script = google.script({ version: 'v1', auth: oauth2Client });
-                console.log("Creating new Apps Script project and binding it to the sheet...");
                 
-                const { data: project } = await script.projects.create({
-                    requestBody: { 
-                        title: `Sheet AI Sync - ${spreadsheetId}`,
-                        parentId: spreadsheetId 
-                    }
-                });
-                const scriptId = project.scriptId;
-                console.log(`Apps Script project created with ID: ${scriptId}`);
-
+                // --- ATOMIC FIX: Prepare script files before creating the project ---
+                console.log("Preparing Apps Script files...");
                 const codePath = path.join(__dirname, '../scripts/code.gs');
                 const codeContent = fs.readFileSync(codePath, 'utf8');
                 const manifestContent = JSON.stringify({
@@ -142,24 +134,33 @@ router.get('/google/callback', async (req, res) => {
                     ]
                 });
 
-                console.log("Updating script content...");
-                await script.projects.updateContent({
-                    scriptId,
-                    requestBody: {
+                console.log("Creating new Apps Script project with content and binding it to the sheet...");
+                // --- ATOMIC FIX: Create the project WITH the files in one API call ---
+                const { data: project } = await script.projects.create({
+                    requestBody: { 
+                        title: `Sheet AI Sync - ${spreadsheetId}`,
+                        parentId: spreadsheetId,
                         files: [
                             { name: 'Code', type: 'SERVER_JS', source: codeContent },
                             { name: 'appsscript', type: 'JSON', source: manifestContent }
                         ]
                     }
                 });
-                console.log("Script content updated.");
+                const scriptId = project.scriptId;
+                console.log(`Apps Script project created with ID: ${scriptId}`);
+                // The script.projects.updateContent call is no longer needed.
 
-                // --- ROBUST FIX: Retry mechanism for running the script ---
                 let setupSuccess = false;
                 const maxRetries = 3;
+                const retryDelay = 5000; // 5 seconds
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     try {
                         console.log(`Attempt ${attempt} to run script setup functions...`);
+                        // Add a small delay before the first attempt as a precaution
+                        if (attempt === 1) {
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
+                        
                         await script.scripts.run({
                             scriptId,
                             requestBody: {
@@ -169,14 +170,12 @@ router.get('/google/callback', async (req, res) => {
                         });
                         console.log("Script setup complete.");
                         setupSuccess = true;
-                        break; // Exit the loop on success
+                        break; 
                     } catch (err) {
-                        // Check if the error is the specific 404 we want to retry on
                         if (err.code === 404 && attempt < maxRetries) {
-                            console.warn(`Function not found on attempt ${attempt}, retrying in 5 seconds...`);
-                            await new Promise(resolve => setTimeout(resolve, 5000));
+                            console.warn(`Function not found on attempt ${attempt}, retrying in ${retryDelay / 1000} seconds...`);
+                            await new Promise(resolve => setTimeout(resolve, retryDelay));
                         } else {
-                            // For other errors or on the last attempt, re-throw the error
                             throw err;
                         }
                     }
