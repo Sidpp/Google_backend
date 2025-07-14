@@ -1,3 +1,9 @@
+/**
+ * A single function called by the Node.js backend to perform all initial setup.
+ * This is more efficient as it only requires one 'scripts.run' call.
+ * @param {string} secret The secret token for API authorization.
+ * @param {string} backendApiUrl The public base URL of your backend.
+ */
 function setupFromBackend(secret, backendApiUrl) {
   // Set the properties
   const scriptProperties = PropertiesService.getScriptProperties();
@@ -20,41 +26,22 @@ function setupFromBackend(secret, backendApiUrl) {
   Logger.log('Successfully created onEdit trigger.');
 }
 
-
-// --- The rest of your Apps Script file remains the same ---
-// (onOpen, setupManualConfig, sendAllData, onSheetEdit, formatDataForSchema)
-
-function setSecretTokenFromBackend(secret, backendApiUrl) {
-  const scriptProperties = PropertiesService.getScriptProperties();
-  scriptProperties.setProperty('API_SECRET_TOKEN', secret);
-  scriptProperties.setProperty('API_BASE_URL', backendApiUrl);
-  Logger.log('Successfully set API secret and backend URL.');
-}
-
-function createTrigger() {
-  const sheetId = SpreadsheetApp.getActiveSpreadsheet().getId();
-  const allTriggers = ScriptApp.getProjectTriggers();
-  for (const trigger of allTriggers) {
-    if (trigger.getHandlerFunction() === 'onSheetEdit') {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  }
-  ScriptApp.newTrigger('onSheetEdit')
-    .forSpreadsheet(sheetId)
-    .onEdit()
-    .create();
-  Logger.log('Successfully created onEdit trigger.');
-}
-
+/**
+ * Creates a custom menu in the Google Sheet UI when the spreadsheet is opened.
+ * This is useful for manual testing and debugging.
+ */
 function onOpen() {
   SpreadsheetApp.getUi()
-      .createMenu('🚀 API Sync')
-      .addItem('📤 Send All Data to API', 'sendAllData')
+      .createMenu('API Sync')
+      .addItem('Send All Data to API', 'sendAllData')
       .addSeparator()
-      .addItem('🔑 (Manual) Set API Config', 'setupManualConfig')
+      .addItem('(Manual) Set API Config', 'setupManualConfig')
       .addToUi();
 }
 
+/**
+ * Manually prompts the user for the API configuration. Only needed for debugging.
+ */
 function setupManualConfig() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.prompt(
@@ -66,7 +53,10 @@ function setupManualConfig() {
   if (response.getSelectedButton() == ui.Button.OK) {
     const [url, token] = response.getResponseText().split(',').map(s => s.trim());
     if (url && token) {
-      setSecretTokenFromBackend(token, url);
+      // We can reuse the setup function's property setting logic
+      const scriptProperties = PropertiesService.getScriptProperties();
+      scriptProperties.setProperty('API_SECRET_TOKEN', token);
+      scriptProperties.setProperty('API_BASE_URL', url);
       ui.alert('✅ Success', 'Manual API config has been saved.', ui.ButtonSet.OK);
     } else {
       ui.alert('Error', 'Invalid format. Please provide both URL and Token.', ui.ButtonSet.OK);
@@ -74,6 +64,10 @@ function setupManualConfig() {
   }
 }
 
+/**
+ * Sends all data from the active sheet to the backend's /api/bulk-import endpoint.
+ * It automatically handles batching to stay within Google's payload size limits.
+ */
 function sendAllData() {
   const scriptProperties = PropertiesService.getScriptProperties();
   const secretToken = scriptProperties.getProperty('API_SECRET_TOKEN');
@@ -114,9 +108,14 @@ function sendAllData() {
     Logger.log(`Bulk Send (Batch ${Math.floor(i / batchSize) + 1}): Response Code ${response.getResponseCode()}`);
   }
 
-  SpreadsheetApp.getUi().alert(` Sent ${jsonData.length} rows to the API.`);
+  SpreadsheetApp.getUi().alert(`Sent ${jsonData.length} rows to the API.`);
 }
 
+/**
+ * An installable trigger that runs automatically when a user edits the spreadsheet.
+ * Sends the data of the edited row to the /api/update endpoint.
+ * @param {Object} e The event object from the onEdit trigger.
+ */
 function onSheetEdit(e) {
   const scriptProperties = PropertiesService.getScriptProperties();
   const secretToken = scriptProperties.getProperty('API_SECRET_TOKEN');
@@ -146,6 +145,13 @@ function onSheetEdit(e) {
   Logger.log(`Update Send (Row ${range.getRow()}): Response Code ${response.getResponseCode()}`);
 }
 
+/**
+ * Converts a row array into a structured JavaScript object using headers as keys.
+ * @param {string[]} headers The array of header names from the first row.
+ * @param {Array} row The array of cell values for a single row.
+ * @param {number} rowIndex The actual row number from the sheet.
+ * @returns {Object|null} A formatted object, or null if the row is empty.
+ */
 function formatDataForSchema(headers, row, rowIndex) {
   if (!row || row.every(cell => cell === "")) {
     return null;

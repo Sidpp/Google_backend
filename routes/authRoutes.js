@@ -55,14 +55,12 @@ router.get('/google/callback', async (req, res) => {
         return res.status(400).send("Invalid state parameter format.");
     }
     
-    // --- FIX: Use the correct keys from the state object ---
     const { sheetId, sheetRange } = decodedState;
 
     if (!sheetId || !sheetRange) {
         return res.status(400).send("Spreadsheet ID or Sheet Name was missing from the state. Please go back and enter them.");
     }
     
-    // --- FIX: Reconstruct the full range string for the API ---
     const spreadsheetId = sheetId;
     const range = `${sheetRange}!A1:AZ1000`;
 
@@ -79,28 +77,13 @@ router.get('/google/callback', async (req, res) => {
         oauth2Client.setCredentials(tokens);
         console.log("Successfully retrieved OAuth tokens.");
 
-        // Immediately send a response to the user to avoid a timeout.
-        
-     res.send(`
-     <html>
-    <head>
-      <title>Success - Redirecting...</title>
-      <meta http-equiv="refresh" content="3;url=https://mnr-pmo-vue.vercel.app/dashboard/settings/profile" />
-    </head>
-    <body>
-      <h2>✅ Success!</h2>
-      <p>Your Google Sheet is being connected in the background.</p>
-   </body>
-    </html>`);
+        res.send("✅ Success! Your Google Sheet is being connected in the background. You can close this window. Check your sheet for the 'API Sync' menu in a minute.");
 
-        // Start the long-running process in the background.
         (async () => {
             try {
                 console.log("--- Starting background processing ---");
                 console.time('background_process_duration');
 
-                // STEP 1: Read Google Sheet
-                console.log(`Reading data from spreadsheet: ${spreadsheetId}, range: ${range}`);
                 const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
                 const sheetResponse = await sheets.spreadsheets.values.get({ spreadsheetId, range });
                 const rows = sheetResponse.data.values;
@@ -111,7 +94,6 @@ router.get('/google/callback', async (req, res) => {
                 }
                 console.log(`Found ${rows.length} rows in the sheet.`);
 
-                // STEP 2: Process data and send to SQS
                 const headers = rows[0];
                 const dataRows = rows.slice(1);
                 const formattedData = dataRows.map((row, index) => {
@@ -135,11 +117,14 @@ router.get('/google/callback', async (req, res) => {
                 await sendBulkImportMessages(formattedData);
                 console.log("Successfully validated and sent data to SQS.");
 
-                // STEP 3: Create & inject Apps Script
                 const script = google.script({ version: 'v1', auth: oauth2Client });
-                console.log("Creating new Apps Script project...");
+                console.log("Creating new Apps Script project and binding it to the sheet...");
+                
                 const { data: project } = await script.projects.create({
-                    requestBody: { title: `Sheet AI Sync - ${spreadsheetId}` }
+                    requestBody: { 
+                        title: `Sheet AI Sync - ${spreadsheetId}`,
+                        parentId: spreadsheetId 
+                    }
                 });
                 const scriptId = project.scriptId;
                 console.log(`Apps Script project created with ID: ${scriptId}`);
@@ -150,7 +135,11 @@ router.get('/google/callback', async (req, res) => {
                     timeZone: 'Asia/Kolkata',
                     exceptionLogging: 'STACKDRIVER',
                     runtimeVersion: 'V8',
-                    executionApi: { access: 'ANYONE' }
+                    oauthScopes: [
+                        "https://www.googleapis.com/auth/spreadsheets.currentonly",
+                        "https://www.googleapis.com/auth/script.scriptapp",
+                        "https://www.googleapis.com/auth/script.external_request"
+                    ]
                 });
 
                 console.log("Updating script content...");
@@ -165,15 +154,38 @@ router.get('/google/callback', async (req, res) => {
                 });
                 console.log("Script content updated.");
 
-                console.log("Running script setup functions...");
-                await script.scripts.run({
-                    scriptId,
-                    requestBody: {
-                        function: 'setupFromBackend',
-                        parameters: [API_SECRET_TOKEN, API_BASE_URL]
+                // --- ROBUST FIX: Retry mechanism for running the script ---
+                let setupSuccess = false;
+                const maxRetries = 3;
+                for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    try {
+                        console.log(`Attempt ${attempt} to run script setup functions...`);
+                        await script.scripts.run({
+                            scriptId,
+                            requestBody: {
+                                function: 'setupFromBackend',
+                                parameters: [API_SECRET_TOKEN, API_BASE_URL]
+                            }
+                        });
+                        console.log("Script setup complete.");
+                        setupSuccess = true;
+                        break; // Exit the loop on success
+                    } catch (err) {
+                        // Check if the error is the specific 404 we want to retry on
+                        if (err.code === 404 && attempt < maxRetries) {
+                            console.warn(`Function not found on attempt ${attempt}, retrying in 5 seconds...`);
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+                        } else {
+                            // For other errors or on the last attempt, re-throw the error
+                            throw err;
+                        }
                     }
-                });
-                console.log("Script setup complete.");
+                }
+
+                if (!setupSuccess) {
+                    throw new Error("Failed to run script setup function after multiple retries.");
+                }
+
                 console.timeEnd('background_process_duration');
                 console.log("--- Background processing finished successfully ---");
 

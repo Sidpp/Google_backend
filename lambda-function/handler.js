@@ -440,7 +440,7 @@ const getAiPredictionsWithRetry = async (inputData) => {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const completion = await openaiClient.chat.completions.create({
-        model: MODEL,
+        model: OPENAI_MODEL,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: pm_ai_prompt },
@@ -448,8 +448,13 @@ const getAiPredictionsWithRetry = async (inputData) => {
         ],
       });
       const responseContent = completion.choices[0].message.content;
-      return AiPredictionSchema.parse(JSON.parse(responseContent));
-    } catch (error) {
+     const parsedJson = JSON.parse(responseContent);
+      if ('Burnout' in parsedJson && !('Burnout_Risk' in parsedJson)) {
+          parsedJson.Burnout_Risk = parsedJson.Burnout;
+          delete parsedJson.Burnout;
+      }
+      return AiPredictionSchema.parse(parsedJson);
+    }  catch (error) {
       logger.warn(`OpenAI API attempt ${attempt + 1} failed: ${error.message}`);
       if (attempt < maxRetries - 1) {
         await exponentialBackoffSleep(attempt);
