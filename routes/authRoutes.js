@@ -1,7 +1,7 @@
 const express = require('express');
 const { google } = require('googleapis');
-const { sendBulkImportMessages } = require('../sqs-service');
-const { bulkImportSchema } = require('../utils/validator'); 
+// const { sendBulkImportMessages } = require('../sqs-service'); // Commented out for test
+// const { bulkImportSchema } = require('../utils/validator'); // Commented out for test
 const path = require('path');
 const fs = require('fs');
 const router = express.Router();
@@ -62,8 +62,6 @@ router.get('/google/callback', async (req, res) => {
     }
     
     const spreadsheetId = sheetId;
-    const range = `${sheetRange}!A1:AZ1000`;
-
 
     const oauth2Client = new google.auth.OAuth2(
         GOOGLE_CLIENT_ID,
@@ -81,130 +79,84 @@ router.get('/google/callback', async (req, res) => {
 
         (async () => {
             try {
-                console.log("--- Starting background processing ---");
-                console.time('background_process_duration');
-
-                const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
-                const sheetResponse = await sheets.spreadsheets.values.get({ spreadsheetId, range });
-                const rows = sheetResponse.data.values;
-
-                if (!rows || rows.length === 0) {
-                    console.log('No data found in the sheet. Background process finished.');
-                    return;
-                }
-                console.log(`Found ${rows.length} rows in the sheet.`);
-
-                const headers = rows[0];
-                const dataRows = rows.slice(1);
-                const formattedData = dataRows.map((row, index) => {
-                    const input_data = {};
-                    headers.forEach((header, i) => {
-                        const key = header?.toString().trim() || `column_${i}`;
-                        if (key) {
-                            input_data[key] = row[i] || null;
-                        }
-                    });
-                    return {
-                        spreadsheet_id: spreadsheetId,
-                        sheet_range: range,
-                        row_index: index + 2,
-                        project_identifier: input_data["Project"] || "Unnamed Project",
-                        sync_timestamp: new Date().toISOString(),
-                        input_data
-                    };
-                });
-                bulkImportSchema.parse({ data: formattedData });
-                await sendBulkImportMessages(formattedData);
-                console.log("Successfully validated and sent data to SQS.");
-
+                console.log("--- Starting background processing (DIAGNOSTIC MODE) ---");
+                
                 const script = google.script({ version: 'v1', auth: oauth2Client });
                 
-                // --- CORRECTED LOGIC: Revert to 2-step create then update ---
                 console.log("Creating new Apps Script project and binding it to the sheet...");
                 const { data: project } = await script.projects.create({
                     requestBody: { 
-                        title: `Sheet AI Sync - ${spreadsheetId}`,
+                        title: `DIAGNOSTIC TEST - ${spreadsheetId}`,
                         parentId: spreadsheetId
                     }
                 });
                 const scriptId = project.scriptId;
                 console.log(`Apps Script project created with ID: ${scriptId}`);
 
-                console.log("Preparing and updating script content...");
-                const codePath = path.join(__dirname, '../scripts/code.gs');
-                const codeContent = fs.readFileSync(codePath, 'utf8');
+                console.log("Preparing and updating with simple test script...");
+                const simpleCode = `function testFunction(param1) { Logger.log('Test function executed successfully with parameter: ' + param1); return 'Hello from Apps Script!'; }`;
                 const manifestContent = JSON.stringify({
                     timeZone: 'Asia/Kolkata',
                     exceptionLogging: 'STACKDRIVER',
-                    runtimeVersion: 'V8',
-                    oauthScopes: [
-                        "https://www.googleapis.com/auth/spreadsheets.currentonly",
-                        "https://www.googleapis.com/auth/script.scriptapp",
-                        "https://www.googleapis.com/auth/script.external_request"
-                    ]
+                    runtimeVersion: 'V8'
                 });
 
                 await script.projects.updateContent({
                     scriptId,
                     requestBody: {
                         files: [
-                            { name: 'Code', type: 'SERVER_JS', source: codeContent },
+                            { name: 'Code', type: 'SERVER_JS', source: simpleCode },
                             { name: 'appsscript', type: 'JSON', source: manifestContent }
                         ]
                     }
                 });
-                console.log("Script content updated.");
-
+                console.log("Simple script content updated.");
 
                 let setupSuccess = false;
                 const maxRetries = 3;
-                const retryDelay = 5000; // 5 seconds
+                const retryDelay = 5000;
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     try {
-                        console.log(`Attempt ${attempt} to run script setup functions...`);
-                        // Add a small delay before the first attempt as a precaution
+                        console.log(`Attempt ${attempt} to run TEST function...`);
                         if (attempt > 1) {
                             await new Promise(resolve => setTimeout(resolve, retryDelay));
                         }
                         
-                        await script.scripts.run({
+                        const runResponse = await script.scripts.run({
                             scriptId,
                             requestBody: {
-                                function: 'setupFromBackend',
-                                parameters: [API_SECRET_TOKEN, API_BASE_URL]
+                                function: 'testFunction',
+                                parameters: ["It worked!"]
                             }
                         });
-                        console.log("Script setup complete.");
+
+                        console.log("TEST function ran successfully!");
+                        console.log("Response from script:", runResponse.data);
                         setupSuccess = true;
                         break; 
                     } catch (err) {
                         if (err.code === 404 && attempt < maxRetries) {
-                            console.warn(`Function not found on attempt ${attempt}, retrying in ${retryDelay / 1000} seconds...`);
+                            console.warn(`TEST function not found on attempt ${attempt}, retrying...`);
                         } else {
-                            // For other errors or on the last attempt, re-throw the error
                             throw err;
                         }
                     }
                 }
 
                 if (!setupSuccess) {
-                    throw new Error("Failed to run script setup function after multiple retries.");
+                    throw new Error("Failed to run TEST function after multiple retries.");
                 }
 
-                console.timeEnd('background_process_duration');
-                console.log("--- Background processing finished successfully ---");
+                console.log("--- DIAGNOSTIC TEST SUCCEEDED ---");
 
             } catch (backgroundErr) {
-                console.error("--- ERROR IN BACKGROUND PROCESS ---");
+                console.error("--- ERROR IN DIAGNOSTIC BACKGROUND PROCESS ---");
                 console.error("Detailed background error:", backgroundErr.response ? JSON.stringify(backgroundErr.response.data, null, 2) : backgroundErr.message);
             }
         })();
 
     } catch (err) {
         console.error("Detailed OAuth callback error (getToken failed):", err.response ? JSON.stringify(err.response.data, null, 2) : err.message);
-        if (err.response && err.response.data && err.response.data.error === 'redirect_uri_mismatch') {
-            return res.status(500).send(`...`); // Kept your mismatch error html
-        }
         return res.status(500).send("An error occurred during the initial authentication step. Please check server logs.");
     }
 });
