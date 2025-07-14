@@ -21,7 +21,7 @@ const inputDataSchema = z.object({
   "Contract ID": z.any().optional(),
   "Expiring Soon": z.any().optional(),
   "Resource Name": z.any().optional(),
-  Rol: z.any().optional(),
+  Role: z.any().optional(),
   "Project Status (RAG)": z.any().optional(),
   "Milestone Status": z.any().optional(),
   Risks: z.any().optional(),

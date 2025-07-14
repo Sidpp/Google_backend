@@ -175,16 +175,28 @@ function formatDataForSchema(headers, row, rowIndex) {
     return null;
   }
 
-  const obj = {
-    rowIndex: rowIndex 
-  };
-
+  const input_data = {};
   headers.forEach((header, i) => {
     const key = header.toString().trim();
     if (key) {
-      obj[key] = row[i];
+      input_data[key] = row[i];
     }
   });
 
-  return obj;
+  const project = input_data["Project"];
+  if (!project) return null;
+
+  const spreadsheet_id = SpreadsheetApp.getActiveSpreadsheet().getId();
+  const sheet_name = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getName();
+  const range = `${sheet_name}!A1:AZ1000`;
+
+  return {
+    spreadsheet_id,
+    sheet_range: range,
+    row_index: rowIndex,
+    project_identifier: project,
+    sync_timestamp: new Date().toISOString(),
+    input_data
+  };
 }
+
