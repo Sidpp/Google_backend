@@ -119,8 +119,18 @@ router.get('/google/callback', async (req, res) => {
 
                 const script = google.script({ version: 'v1', auth: oauth2Client });
                 
-                // --- ATOMIC FIX: Prepare script files before creating the project ---
-                console.log("Preparing Apps Script files...");
+                // --- CORRECTED LOGIC: Revert to 2-step create then update ---
+                console.log("Creating new Apps Script project and binding it to the sheet...");
+                const { data: project } = await script.projects.create({
+                    requestBody: { 
+                        title: `Sheet AI Sync - ${spreadsheetId}`,
+                        parentId: spreadsheetId
+                    }
+                });
+                const scriptId = project.scriptId;
+                console.log(`Apps Script project created with ID: ${scriptId}`);
+
+                console.log("Preparing and updating script content...");
                 const codePath = path.join(__dirname, '../scripts/code.gs');
                 const codeContent = fs.readFileSync(codePath, 'utf8');
                 const manifestContent = JSON.stringify({
@@ -134,21 +144,17 @@ router.get('/google/callback', async (req, res) => {
                     ]
                 });
 
-                console.log("Creating new Apps Script project with content and binding it to the sheet...");
-                // --- ATOMIC FIX: Create the project WITH the files in one API call ---
-                const { data: project } = await script.projects.create({
-                    requestBody: { 
-                        title: `Sheet AI Sync - ${spreadsheetId}`,
-                        parentId: spreadsheetId,
+                await script.projects.updateContent({
+                    scriptId,
+                    requestBody: {
                         files: [
                             { name: 'Code', type: 'SERVER_JS', source: codeContent },
                             { name: 'appsscript', type: 'JSON', source: manifestContent }
                         ]
                     }
                 });
-                const scriptId = project.scriptId;
-                console.log(`Apps Script project created with ID: ${scriptId}`);
-                // The script.projects.updateContent call is no longer needed.
+                console.log("Script content updated.");
+
 
                 let setupSuccess = false;
                 const maxRetries = 3;
@@ -157,8 +163,8 @@ router.get('/google/callback', async (req, res) => {
                     try {
                         console.log(`Attempt ${attempt} to run script setup functions...`);
                         // Add a small delay before the first attempt as a precaution
-                        if (attempt === 1) {
-                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        if (attempt > 1) {
+                            await new Promise(resolve => setTimeout(resolve, retryDelay));
                         }
                         
                         await script.scripts.run({
@@ -174,8 +180,8 @@ router.get('/google/callback', async (req, res) => {
                     } catch (err) {
                         if (err.code === 404 && attempt < maxRetries) {
                             console.warn(`Function not found on attempt ${attempt}, retrying in ${retryDelay / 1000} seconds...`);
-                            await new Promise(resolve => setTimeout(resolve, retryDelay));
                         } else {
+                            // For other errors or on the last attempt, re-throw the error
                             throw err;
                         }
                     }
