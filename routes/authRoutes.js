@@ -31,6 +31,7 @@ router.get('/google', (req, res) => {
         scope: [
             'https://www.googleapis.com/auth/spreadsheets', 
             'https://www.googleapis.com/auth/script.projects',
+            'https://www.googleapis.com/auth/script.deployments', // Added scope for deployments
             'https://www.googleapis.com/auth/script.scriptapp'
         ],
         prompt: 'consent', 
@@ -79,7 +80,7 @@ router.get('/google/callback', async (req, res) => {
 
         (async () => {
             try {
-                console.log("--- Starting background processing (DIAGNOSTIC MODE) ---");
+                console.log("--- Starting background processing (DIAGNOSTIC MODE V2) ---");
                 
                 const script = google.script({ version: 'v1', auth: oauth2Client });
                 
@@ -111,6 +112,28 @@ router.get('/google/callback', async (req, res) => {
                     }
                 });
                 console.log("Simple script content updated.");
+
+                // --- NEW STEP: Create a versioned deployment ---
+                console.log("Creating a new versioned deployment for the script...");
+                const versionResponse = await script.projects.versions.create({
+                    scriptId: scriptId,
+                    requestBody: {
+                        description: "Initial version for API execution"
+                    }
+                });
+                const versionNumber = versionResponse.data.versionNumber;
+                console.log(`Created version: ${versionNumber}`);
+
+                await script.projects.deployments.create({
+                    scriptId: scriptId,
+                    requestBody: {
+                        versionNumber: versionNumber,
+                        manifestFileName: "appsscript",
+                        description: "API Executable Deployment"
+                    }
+                });
+                console.log("Deployment created successfully.");
+
 
                 let setupSuccess = false;
                 const maxRetries = 3;
