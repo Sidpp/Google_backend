@@ -16,7 +16,6 @@ if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI || !API_S
 router.get('/google', (req, res) => {
     const { state } = req.query;
     
-
     if (!state || state === "{}") {
         return res.status(400).send("State is missing or empty. Please provide spreadsheet details on the previous page.");
     }
@@ -30,23 +29,23 @@ router.get('/google', (req, res) => {
     const authUrl = oauth2Client.generateAuthUrl({
         access_type: 'offline',
         scope: [
-            'https://www.googleapis.com/auth/spreadsheets.readonly',
+            // CORRECTED: Changed from .readonly to full access to allow trigger creation.
+            'https://www.googleapis.com/auth/spreadsheets', 
             'https://www.googleapis.com/auth/script.projects',
-            'https://www.googleapis.com/auth/script.external_request',
+            // REMOVED: 'script.external_request' is deprecated and no longer needed.
             'https://www.googleapis.com/auth/script.scriptapp'
         ],
         prompt: 'consent', 
         state
     });
-   
+    
     res.redirect(authUrl);
-  console.log("redirected")
+    
 });
 
 router.get('/google/callback', async (req, res) => {
     const { code, state } = req.query;
 
-  
     if (!code) {
         console.error("OAuth Callback Error: 'code' parameter is missing from Google's response.");
         return res.status(400).send("Authorization code is missing. Please try authenticating again.");
@@ -58,7 +57,6 @@ router.get('/google/callback', async (req, res) => {
 
     let decodedState;
     try {
-        // req.query should already be URL-decoded by Express
         decodedState = JSON.parse(state);
     } catch (err) {
         console.error("OAuth Callback Error: Failed to parse state parameter.", { state, error: err });
@@ -101,19 +99,18 @@ router.get('/google/callback', async (req, res) => {
         const formattedData = dataRows.map((row,index) => {
             const input_data = {};
             headers.forEach((header, i) => {
-                const key = header?.toString().trim() || `coloumn _${i}`;
+                const key = header?.toString().trim() || `column_${i}`;
                 if(key){
                   input_data[key] = row[i] || null;
                 }
-          
             });
             return {
-             spreadsheet_id: spreadsheetId,
-             sheet_range: range,
-             row_index: index + 2, // Sheets are 1-based, and headers are row 1
-             project_identifier: input_data["Project"] || "Unnamed Project",
-              sync_timestamp: new Date().toISOString(),
-             input_data
+              spreadsheet_id: spreadsheetId,
+              sheet_range: range,
+              row_index: index + 2, // Sheets are 1-based, and headers are row 1
+              project_identifier: input_data["Project"] || "Unnamed Project",
+               sync_timestamp: new Date().toISOString(),
+              input_data
             };
         });
 
@@ -135,7 +132,7 @@ router.get('/google/callback', async (req, res) => {
         const codePath = path.join(__dirname, '../scripts/code.gs');
         const codeContent = fs.readFileSync(codePath, 'utf8');
         const manifestContent = JSON.stringify({
-            timeZone: 'Asia/Kolkata',   // change the timzone accordingly 
+            timeZone: 'Asia/Kolkata',   // change the timezone accordingly 
             exceptionLogging: 'STACKDRIVER',
             runtimeVersion: 'V8',
             executionApi: { access: 'ANYONE' }
