@@ -80,7 +80,18 @@ router.get('/google/callback', async (req, res) => {
         console.log("Successfully retrieved OAuth tokens.");
 
         // Immediately send a response to the user to avoid a timeout.
-        res.send("✅ Success! Your Google Sheet is being connected in the background. You can close this window. Check your sheet for the 'API Sync' menu in a minute.");
+        
+     res.send(`
+     <html>
+    <head>
+      <title>Success - Redirecting...</title>
+      <meta http-equiv="refresh" content="3;url=https://mnr-pmo-vue.vercel.app/dashboard/settings/profile" />
+    </head>
+    <body>
+      <h2>✅ Success!</h2>
+      <p>Your Google Sheet is being connected in the background.</p>
+   </body>
+    </html>`);
 
         // Start the long-running process in the background.
         (async () => {
