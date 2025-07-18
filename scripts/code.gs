@@ -94,7 +94,7 @@ function onOpen() {
   try {
     SpreadsheetApp.getUi()
         .createMenu('API Sync')
-        .addItem('Send All Data to API', 'sendAllData')
+       
         .addItem('Test Configuration', 'showTestConfiguration')
         .addSeparator()
         .addItem('(Manual) Set API Config', 'setupManualConfig')

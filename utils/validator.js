@@ -25,7 +25,7 @@ const inputDataSchema = z.object({
   "Resource Name": z.any().optional(),
   Role: z.any().optional(),
   "Allocated Hours": stringToNumber.optional().nullable(),
-}).passthrough(); 
+}).passthrough(true); 
 
 const bulkImportSchema = z.object({
   data: z.array(z.object({

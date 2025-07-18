@@ -5,9 +5,10 @@
   "type": "module",
   "main": "handler.js",
   "dependencies": {
+    "groq-sdk": "^0.27.0",
+    "mongodb": "^6.17.0",
     "openai": "^4.0.0",
-    "zod": "^3.22.0",
-    "mongodb": "^6.0.0",
-    "ts-dedent": "^2.2.0"
+    "ts-dedent": "^2.2.0",
+    "zod": "^3.25.76"
   }
 }

@@ -8,5 +8,5 @@ region = "us-east-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 disable_rollback = true
-parameter_overrides = "BulkImportQueueArn=\"arn:aws:sqs:us-east-1:157489952161:sqs1\" UpdateQueueArn=\"arn:aws:sqs:us-east-1:157489952161:sqs2\" DbName=\"PPPVue\" ProcessedDataCollection=\"Google_sheet_Data\" GroqModel=\"llama3-8b-8192\""
+parameter_overrides = "BulkImportQueueArn=\"arn:aws:sqs:us-east-1:157489952161:sqs1\" UpdateQueueArn=\"arn:aws:sqs:us-east-1:157489952161:sqs2\" DbName=\"PPPVue\" ProcessedDataCollection=\"GoogleSheet\" GroqModel=\"llama3-70b-8192\""
 image_repositories = []
