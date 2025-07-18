@@ -24,17 +24,15 @@ async function sendBulkImportMessages(dataArray) {
         };
 
         try {
-            //  Log the data before sending
+           
             console.log("Sending row:", JSON.stringify(row, null, 2));
 
             await sqsClient.send(new SendMessageCommand(params));
             successfullySentCount++;
         } catch (error) {
-            // Catch and log any error from AWS
             console.error("AWS SQS Send Error:", error.name, error.message);
             console.error("Error occurred for row:", JSON.stringify(row, null, 2));
-            // Optional: stop on first error
-            // break; 
+        
         }
     }
     console.log(` Finished SQS send process. Successfully sent ${successfullySentCount}/${dataArray.length} messages.`);
@@ -47,8 +45,10 @@ async function sendUpdateMessage(updatedData) {
         QueueUrl: UPDATE_QUEUE_URL,
         MessageBody: JSON.stringify(updatedData),
     };
-
+        
     try {
+        console.log("Sending row:", JSON.stringify(updatedData, null, 2));
+
         await sqsClient.send(new SendMessageCommand(params));
         console.log(` Sent update to SQS: ${updatedData.project_identifier}`);
     } catch (error) {

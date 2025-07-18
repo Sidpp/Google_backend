@@ -1,12 +1,12 @@
 import Groq from "groq-sdk";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import { z } from "zod";
 import { dedent } from "ts-dedent";
 
 const logger = console;
 
 const SqsPayloadSchema = z.object({
-  userId :z.string().min(1,{message:"User ID is required in the SQS message"}),
+  userId: z.string().min(1, { message: "User ID is required in the SQS message." }),
   spreadsheet_id: z.string().min(1, { message: "Spreadsheet ID is required." }),
   sheet_range: z.string().min(1, { message: "Sheet range is required." }),
   row_index: z.number().int().positive(),
@@ -24,7 +24,7 @@ const AiPredictionSchema = z.object({
 });
 
 const MongoDbSchema = z.object({
-  userId:z.instanceof(Object(Id)),
+  userId: z.instanceof(ObjectId),
   spreadsheet_id: z.string(),
   row_index: z.number(),
   project_identifier: z.string(),
@@ -58,7 +58,7 @@ const {
   MONGO_URI,
   DB_NAME,
   PROCESSED_DATA_COLLECTION = "GoogleSheet",
-  LLAMA_MODEL = "llama3-8b-8192", // Using Llama model with Groq
+  LLAMA_MODEL = "llama3-8b-8192",
   MAX_RETRIES = "3",
   RETRY_BASE_DELAY = "1.0",
 } = process.env;
@@ -66,6 +66,7 @@ const {
 if (!MONGO_URI || !DB_NAME || !GROQ_API_KEY) {
   throw new Error("FATAL: Missing one or more essential environment variables (MONGO_URI, DB_NAME, GROQ_API_KEY).");
 }
+
 
 const maxRetries = parseInt(MAX_RETRIES, 10);
 const retryBaseDelay = parseFloat(RETRY_BASE_DELAY);
@@ -75,35 +76,17 @@ const mongoClient = new MongoClient(MONGO_URI, { serverSelectionTimeoutMS: 5000 
 let db;
 
 const initializeMongoDB = async () => {
-  try {
-    if (!mongoClient) {
-      mongoClient = new MongoClient(MONGO_URI, {
-        serverSelectionTimeoutMS: 10000,
-        connectTimeoutMS: 10000,
-        socketTimeoutMS: 10000,
-        maxPoolSize: 10,
-        minPoolSize: 1,
-        retryWrites: true,
-        w: 'majority'
-      });
-
-      await mongoClient.connect();
-      logger.info("MongoDB client connected successfully");
+    try {
+        await mongoClient.db("admin").command({ ping: 1 });
+        logger.info("MongoDB client is already connected.");
+    } catch (e) {
+        logger.info("MongoDB client is not connected. Attempting to connect...");
+        await mongoClient.connect();
+        logger.info("MongoDB client connected successfully.");
     }
-
-    if (!db) {
-      db = mongoClient.db(DB_NAME);
-      logger.info(`Connected to database: ${DB_NAME}`);
-    }
-
-    return true;
-  } catch (error) {
-    logger.error(`Failed to initialize MongoDB: ${error.message}`);
-    throw error;
-  }
+    db = mongoClient.db(DB_NAME);
 };
 
-// --- AI Prompt (remains unchanged as it's for the LLM) ---
 const pm_ai_prompt = dedent`
 You are an AI Project Risk Analyst specializing in Google sheet
 
@@ -558,7 +541,7 @@ const processSingleRecord = async (record) => {
     if (!aiPredictions) throw new Error("Received null predictions from AI service.");
 
     const documentToStore = {
-      userId:new onrejectionhandled(userId),
+      userId:new ObjectId(userId),
       spreadsheet_id,
       row_index,
       project_identifier,
@@ -571,7 +554,12 @@ const processSingleRecord = async (record) => {
     const validatedDocument = MongoDbSchema.parse(documentToStore);
     logger.info(`Document validated successfully`);
 
-    const upsertKey = { spreadsheet_id, row_index,userId :new onrejectionhandled(userId)};
+    const upsertKey = {
+      spreadsheet_id,
+       row_index,
+       userId: new ObjectId(userId)
+     };
+
     const success = await storeDocumentWithRetry(validatedDocument, upsertKey);
 
     if (!success) throw new Error("Failed to store document in MongoDB after retries");
@@ -589,14 +577,8 @@ export const handler = async (event) => {
   logger.info(`Lambda function started. Processing ${event.Records.length} records`);
 
   try {
+   
     await initializeMongoDB();
-
-    const isConnected = await testMongodbConnection();
-    if (!isConnected) {
-      logger.error("MongoDB connection failed - cannot process records");
-      return { batchItemFailures: event.Records.map(r => ({ itemIdentifier: r.messageId })) };
-    }
-
     const processingPromises = event.Records.map(processSingleRecord);
     const results = await Promise.all(processingPromises);
 
@@ -608,8 +590,7 @@ export const handler = async (event) => {
 
     return { batchItemFailures };
   } catch (error) {
-    logger.error(`Handler error: ${error.message}`);
-    logger.error(`Error stack: ${error.stack}`);
+    logger.error(`A critical error occurred in the handler: ${error.message}`);
     return { batchItemFailures: event.Records.map(r => ({ itemIdentifier: r.messageId })) };
   }
 };

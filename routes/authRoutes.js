@@ -125,7 +125,7 @@ router.get('/google/callback', async (req, res) => {
                 const dataRows = rows.slice(1);
                 
                 // --- WHAT WAS CHANGED (CRITICAL) ---
-                // The `userId` is now added to every single message payload.
+                // The `userId` is now added to every single message payload. 
                 const formattedData = dataRows.map((row, index) => {
                     const input_data = {};
                     headers.forEach((header, i) => {
