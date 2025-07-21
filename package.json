@@ -19,6 +19,7 @@
     "express-rate-limit": "^7.5.1",
     "fs": "^0.0.1-security",
     "googleapis": "^150.0.1",
+    "mongodb": "^6.17.0",
     "path": "^0.12.7",
     "router": "^2.2.0",
     "uuid": "^11.1.0",

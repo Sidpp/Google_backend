@@ -6,6 +6,7 @@ import { dedent } from "ts-dedent";
 const logger = console;
 
 const SqsPayloadSchema = z.object({
+  connectionId:z.string().min(1,{message:"Connection ID is required"}),
   userId: z.string().min(1, { message: "User ID is required in the SQS message." }),
   spreadsheet_id: z.string().min(1, { message: "Spreadsheet ID is required." }),
   sheet_range: z.string().min(1, { message: "Sheet range is required." }),
@@ -23,7 +24,8 @@ const AiPredictionSchema = z.object({
   Burnout_Risk: z.number(),
 });
 
-const MongoDbSchema = z.object({
+const MongoDbRowSchema = z.object({
+  connectionId: z.instanceof(ObjectId),
   userId: z.instanceof(ObjectId),
   spreadsheet_id: z.string(),
   row_index: z.number(),
@@ -57,7 +59,7 @@ const {
   GROQ_API_KEY,
   MONGO_URI,
   DB_NAME,
-  PROCESSED_DATA_COLLECTION = "GoogleSheet",
+  PROCESSED_DATA_COLLECTION = "GoogleSheetData",
   LLAMA_MODEL = "llama3-8b-8192",
   MAX_RETRIES = "3",
   RETRY_BASE_DELAY = "1.0",
@@ -121,7 +123,7 @@ Return a valid JSON object with these exact keys:
   "Issues": "<Budget cut|Requirement gap|Overtime reported|Escalation pending>",
   "Forecasted_Cost": <$xx,xxx>,
   "Forecasted_Deviation": < $±xx,xxx>,
-  "Burnout":<%x.x>
+  "Burnout_Risk":<%x.x>
 }
 
 ###Tasks
@@ -426,17 +428,6 @@ const exponentialBackoffSleep = (attempt, baseDelay = retryBaseDelay) => {
   return new Promise(resolve => setTimeout(resolve, totalDelay));
 };
 
-const testMongodbConnection = async () => {
-  try {
-    await mongoClient.db("admin").command({ ping: 1 });
-    logger.info("MongoDB connection test successful.");
-    return true;
-  } catch (error) {
-    logger.error(`MongoDB connection failed: ${error.message}`);
-    return false;
-  }
-};
-
 const getAiPredictionsWithRetry = async (inputData) => {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -489,59 +480,23 @@ const getAiPredictionsWithRetry = async (inputData) => {
   return null;
 };
 
-const storeDocumentWithRetry = async (document, upsertKey) => {
-  const collection = db.collection(PROCESSED_DATA_COLLECTION);
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      logger.info(`Attempting to store document (attempt ${attempt + 1})`);
-      logger.info(`Upsert key: ${JSON.stringify(upsertKey)}`);
-      logger.info(`Document to store: ${JSON.stringify(document, null, 2)}`);
-
-      const result = await collection.updateOne(
-        upsertKey,
-        { $set: document },
-        { upsert: true }
-      );
-
-      logger.info(`MongoDB operation result: ${JSON.stringify(result)}`);
-
-      if (result.acknowledged) {
-        logger.info(`Document ${result.upsertedId ? 'inserted' : 'updated'} successfully`);
-        return true;
-      } else {
-        throw new Error("MongoDB operation not acknowledged");
-      }
-    } catch (error) {
-      logger.warn(`MongoDB op attempt ${attempt + 1} failed: ${error.message}`);
-      logger.error(`Error details: ${error.stack}`);
-
-      if (attempt < maxRetries - 1) {
-        await exponentialBackoffSleep(attempt);
-      } else {
-        throw new Error(`All MongoDB operation attempts failed. Last error: ${error.message}`);
-      }
-    }
-  }
-  return false;
-};
-
+// --- Main Record Processor ---
 const processSingleRecord = async (record) => {
   try {
     logger.info(`Processing record: ${record.messageId}`);
-    logger.info(`Record body: ${record.body}`);
-
     const sqsPayload = SqsPayloadSchema.parse(JSON.parse(record.body));
-    const { userId,spreadsheet_id, row_index, project_identifier, sync_timestamp, input_data } = sqsPayload;
+    
+    const { connectionId, userId, spreadsheet_id, row_index, project_identifier, sync_timestamp, input_data } = sqsPayload;
 
-    logger.info(`Processing: ${project_identifier} (Row ${row_index}) for user ${userId}`);
-    logger.info(`Input data: ${JSON.stringify(input_data, null, 2)}`);
+    logger.info(`Processing: Row ${row_index} for connection ${connectionId}`);
 
     const aiPredictions = await getAiPredictionsWithRetry(input_data);
     if (!aiPredictions) throw new Error("Received null predictions from AI service.");
 
-    const documentToStore = {
-      userId:new ObjectId(userId),
+    // Step A: Create the document for the individual row
+    const rowDocument = {
+      userId: new ObjectId(userId),
+      connectionId: new ObjectId(connectionId),
       spreadsheet_id,
       row_index,
       project_identifier,
@@ -551,20 +506,27 @@ const processSingleRecord = async (record) => {
       last_processed_at: new Date().toISOString(),
     };
 
-    const validatedDocument = MongoDbSchema.parse(documentToStore);
-    logger.info(`Document validated successfully`);
+   
+    const validatedRowDocument = MongoDbRowSchema.parse(rowDocument);
+    const upsertKey = { connectionId: new ObjectId(connectionId), row_index };
 
-    const upsertKey = {
-      spreadsheet_id,
-       row_index,
-       userId: new ObjectId(userId)
-     };
+  
+    const rowsCollection = db.collection(PROCESSED_DATA_COLLECTION);
+    await rowsCollection.updateOne(upsertKey, { $set: validatedRowDocument }, { upsert: true });
+    
+   
+    const findResult = await rowsCollection.findOne(upsertKey, { projection: { _id: 1 } });
+    if (!findResult) throw new Error("Could not find the row ID after upsert.");
+    const rowId = findResult._id;
 
-    const success = await storeDocumentWithRetry(validatedDocument, upsertKey);
-
-    if (!success) throw new Error("Failed to store document in MongoDB after retries");
-
-    logger.info(`Successfully processed record ${record.messageId}`);
+  
+    const connectionsCollection = db.collection('GoogleCredentials');
+    await connectionsCollection.updateOne(
+        { _id: new ObjectId(connectionId) },
+        { $addToSet: { rows: rowId } } 
+    );
+    
+    logger.info(`Successfully processed and linked row ${row_index} for connection ${connectionId}`);
     return { success: true, record_id: record.messageId };
   } catch (error) {
     logger.error(`Failed to process record ${record.messageId}: ${error.message}`);
@@ -574,23 +536,17 @@ const processSingleRecord = async (record) => {
 };
 
 export const handler = async (event) => {
-  logger.info(`Lambda function started. Processing ${event.Records.length} records`);
-
   try {
-   
     await initializeMongoDB();
     const processingPromises = event.Records.map(processSingleRecord);
     const results = await Promise.all(processingPromises);
-
     const batchItemFailures = results
       .filter(result => !result.success)
       .map(result => ({ itemIdentifier: result.record_id }));
-
-    logger.info(`Processing complete. Success: ${event.Records.length - batchItemFailures.length}, Failed: ${batchItemFailures.length}`);
-
     return { batchItemFailures };
   } catch (error) {
     logger.error(`A critical error occurred in the handler: ${error.message}`);
     return { batchItemFailures: event.Records.map(r => ({ itemIdentifier: r.messageId })) };
   }
 };
+

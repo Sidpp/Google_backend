@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const bodyParser = require('body-parser');
-
+const { connectDB } = require('./db'); 
 const authenticateRequest = require('./middleware/auth');
 const apiLimiter = require('./middleware/rateLimit');
 const authRoutes = require('./routes/authRoutes');
@@ -25,7 +25,12 @@ app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
 app.use('/auth', authRoutes);
 app.use('/api',apiLimiter,authenticateRequest, apiRoutes);
-
+connectDB().then(()=>{
 app.listen(port, () => {
   console.log(`API Server running on port ${port}`);
+});
+
+}).catch(err=>{
+    console.error("Failed to connect to the database. Server did not start.", err);
+    process.exit(1); 
 });

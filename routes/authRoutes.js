@@ -6,7 +6,8 @@ const { bulkImportSchema } = require('../utils/validator');
 const path = require('path');
 const fs = require('fs');
 const router = express.Router();
-
+const GoogleUsers = require('../models/GoogleUsers');
+const GoogleCredential = require('../models/GoogleCredential');
 // --- CONFIGURATION ---
 const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, API_SECRET_TOKEN, API_BASE_URL } = process.env;
 
@@ -101,6 +102,21 @@ router.get('/google/callback', async (req, res) => {
         // their data in the future for syncing without them needing to log in again.
 
         // Redirect immediately for a better user experience.
+           const newConnection = await GoogleCredential.create({
+            userId: userId, // Mongoose handles the ObjectId conversion
+            spreadsheetId: spreadsheetId,
+            sheetRange: sheetRange,
+            googleTokens: tokens,
+            rows: []
+        });
+        const connectionId = newConnection._id;
+        console.log(`Created new Google credential with ID: ${connectionId}`);
+        
+        // 2. UPDATE THE USER DOCUMENT IN `GoogleUsers` using the Mongoose model
+        await GoogleUser.findByIdAndUpdate(userId, {
+            $set: { google_credential_id: connectionId }
+        });
+
         res.redirect("https://mnr-pmo-vue.vercel.app/dashboard/settings/profile?status=processing");
 
         // --- BACKGROUND PROCESSING ---
@@ -137,6 +153,7 @@ router.get('/google/callback', async (req, res) => {
                     
                     // This is the object that will be sent to SQS for the Lambda to process.
                     return {
+                        connectionId:connectionId.toString(),
                         userId: userId, // <-- The user's ID is now part of the message.
                         spreadsheet_id: spreadsheetId,
                         sheet_range: range,
