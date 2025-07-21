@@ -20,6 +20,7 @@
     "fs": "^0.0.1-security",
     "googleapis": "^150.0.1",
     "mongodb": "^6.17.0",
+    "mongoose": "^8.16.4",
     "path": "^0.12.7",
     "router": "^2.2.0",
     "uuid": "^11.1.0",
