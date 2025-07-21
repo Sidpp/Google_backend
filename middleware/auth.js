@@ -1,5 +1,4 @@
 const API_SECRET_TOKEN = process.env.API_SECRET_TOKEN;
-
 module.exports = function authenticateRequest(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
