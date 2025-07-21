@@ -1,34 +1,32 @@
-const { MongoClient } = require('mongodb');
-const uri = process.env.MONGO_URI;
-if (!uri) {
-    throw new Error('Please define the MONGO_URI environment variable inside .env');
-}
+// =================================================================
+// Corrected Database File (db.js)
+// Use this code to replace the contents of your existing db.js
+// =================================================================
+const mongoose = require('mongoose');
 
-const client = new MongoClient(uri);
-let db;
+// This function connects to the database using Mongoose.
+const connectDB = async () => {
+    const uri = process.env.MONGODB_URI;
 
-async function connectDB() {
-    if (db) {
-        return db;
+    if (!uri) {
+        // Throw a clear error if the connection string is missing.
+        throw new Error("MONGODB_URI is not defined in environment variables. Server cannot start.");
     }
+    
     try {
-        await client.connect();
-        console.log("Successfully connected to MongoDB.");
-        db = client.db(); // This will connect to the 'PPPVue' database specified in your URI
-        return db;
-    } catch (e) {
-        console.error("Failed to connect to MongoDB", e);
-        process.exit(1); // Exit the process if DB connection fails
-    }
-}
-
-// Export the db instance directly for use in other files
-module.exports = {
-    connectDB,
-    getDb: () => {
-        if (!db) {
-            throw new Error("Database not initialized. Call connectDB first.");
-        }
-        return db;
+        // Use mongoose.connect() which is the required method for Mongoose apps.
+        // It manages the connection pool for your entire application.
+        await mongoose.connect(uri, {
+            // These options are recommended for modern Mongoose versions
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+        });
+        console.log("Successfully connected to MongoDB using Mongoose.");
+    } catch (error) {
+        console.error("Failed to connect to MongoDB using Mongoose.", error);
+        // Re-throw the error to be caught by startServer() in index.js
+        throw error;
     }
 };
+
+module.exports = { connectDB };
