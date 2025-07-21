@@ -48,8 +48,8 @@ router.get('/google', (req, res) => {
             'https://www.googleapis.com/auth/drive'
         ],
         prompt: 'consent', // 'consent' forces the user to see the consent screen every time. 
-                           // This is good for development but for production, you might remove it
-                           // so returning users don't have to re-consent if they have a valid refresh token.
+                            // This is good for development but for production, you might remove it
+                            // so returning users don't have to re-consent if they have a valid refresh token.
         state
     });
     
@@ -74,8 +74,6 @@ router.get('/google/callback', async (req, res) => {
         return res.status(400).send("Invalid state parameter format.");
     }
     
-    // --- WHAT WAS CHANGED (CRITICAL) ---
-    // We now explicitly extract the `userId` from the state object.
     const { sheetId, sheetRange, userId } = decodedState;
 
     if (!sheetId || !sheetRange || !userId) {
@@ -96,13 +94,8 @@ router.get('/google/callback', async (req, res) => {
         oauth2Client.setCredentials(tokens);
         console.log("Successfully retrieved OAuth tokens.");
 
-        // ARCHITECTURAL SUGGESTION: Storing Tokens
-        // The `tokens` object, especially the `refresh_token`, should be saved to your database now,
-        // associated with this user and this specific sheet connection. This allows you to re-access
-        // their data in the future for syncing without them needing to log in again.
-
-        // Redirect immediately for a better user experience.
-           const newConnection = await GoogleCredential.create({
+        // Create the new credential record in the database
+        const newConnection = await GoogleCredential.create({
             userId: userId, // Mongoose handles the ObjectId conversion
             spreadsheetId: spreadsheetId,
             sheetRange: sheetRange,
@@ -112,8 +105,8 @@ router.get('/google/callback', async (req, res) => {
         const connectionId = newConnection._id;
         console.log(`Created new Google credential with ID: ${connectionId}`);
         
-        // 2. UPDATE THE USER DOCUMENT IN `GoogleUsers` using the Mongoose model
-        await GoogleUser.findByIdAndUpdate(userId, {
+        // --- FIX: Use the correct variable 'GoogleUsers' which was imported at the top ---
+        await GoogleUsers.findByIdAndUpdate(userId, {
             $set: { google_credential_id: connectionId }
         });
 
@@ -140,7 +133,6 @@ router.get('/google/callback', async (req, res) => {
                 const headers = rows[0];
                 const dataRows = rows.slice(1);
                 
-                // --- WHAT WAS CHANGED (CRITICAL) ---
                 // The `userId` is now added to every single message payload. 
                 const formattedData = dataRows.map((row, index) => {
                     const input_data = {};
@@ -165,19 +157,10 @@ router.get('/google/callback', async (req, res) => {
                 });
 
                 // Step 2: Validate and send to SQS
-                // ARCHITECTURAL SUGGESTION: The schema validation could also happen here,
-                // but doing it in the Lambda is also fine as it protects the processor.
-                // bulkImportSchema.parse({ data: formattedData }); // Assuming this validates an array
                 await sendBulkImportMessages(formattedData);
                 console.log(`Successfully sent ${formattedData.length} messages to SQS for user ${userId}.`);
 
-                // Step 3 & 4: Apps Script Creation
-                // ARCHITECTURAL SUGGESTION: This entire section is a separate concern from data import.
-                // It would be better to move this logic into its own module or even a separate,
-                // dedicated background job. This would make your callback handler much cleaner,
-                // easier to test, and less prone to monolithic failures.
-                
-                // ... (Your existing Apps Script creation logic would go here) ...
+                // Step 3 & 4: Apps Script Creation (Placeholder for future logic)
                 console.log("Apps Script processing would start here...");
 
 
@@ -188,9 +171,6 @@ router.get('/google/callback', async (req, res) => {
                 console.error(`--- ERROR IN BACKGROUND PROCESS for user ${userId} ---`);
                 if (backgroundErr.code === 403) {
                     console.error(`PERMISSION DENIED: The authenticated user does not have access to sheet ${spreadsheetId}.`);
-                    // ARCHITECTURAL SUGGESTION: Here you should update a status in your database
-                    // for this connection to "failed" and provide a reason. The frontend can
-                    // then show a user-friendly error message.
                 } else {
                     console.error("An unexpected error occurred:", {
                         message: backgroundErr.message,
