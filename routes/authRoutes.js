@@ -3,12 +3,9 @@ const { google } = require('googleapis');
 // Make sure to import your SQS service and validation schemas correctly
 const { sendBulkImportMessages } = require('../sqs-service'); 
 const { bulkImportSchema } = require('../utils/validator'); 
-const path = require('path');
-const fs = require('fs');
 const router = express.Router();
-const GoogleUsers = require('../models/GoogleUsers');
+const User = require('../models/GoogleUsers');
 const GoogleCredential = require('../models/GoogleCredential');
-// --- CONFIGURATION ---
 const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, API_SECRET_TOKEN, API_BASE_URL } = process.env;
 
 // A single check at startup is a good practice.
@@ -56,10 +53,6 @@ router.get('/google', (req, res) => {
     res.redirect(authUrl);
 });
 
-// =================================================================
-// ROUTE: /auth/google/callback
-// Handles the redirect from Google after user authentication.
-// =================================================================
 router.get('/google/callback', async (req, res) => {
     const { code, state } = req.query;
 
@@ -94,9 +87,9 @@ router.get('/google/callback', async (req, res) => {
         oauth2Client.setCredentials(tokens);
         console.log("Successfully retrieved OAuth tokens.");
 
-        // Create the new credential record in the database
+
         const newConnection = await GoogleCredential.create({
-            userId: userId, // Mongoose handles the ObjectId conversion
+            userId: userId, 
             spreadsheetId: spreadsheetId,
             sheetRange: sheetRange,
             googleTokens: tokens,
