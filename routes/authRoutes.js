@@ -106,7 +106,7 @@ router.get('/google/callback', async (req, res) => {
         console.log(`Created new Google credential with ID: ${connectionId}`);
         
         // --- FIX: Use the correct variable 'GoogleUsers' which was imported at the top ---
-        await GoogleUsers.findByIdAndUpdate(userId, {
+        await User.findByIdAndUpdate(userId, {
             $set: { google_credential_id: connectionId }
         });
 
