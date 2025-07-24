@@ -8,5 +8,5 @@ region = "us-east-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 disable_rollback = true
-parameter_overrides = "BulkImportQueueArn=\"arn:aws:sqs:us-east-1:112671578192:GoogleSheetQueue\" UpdateQueueArn=\"arn:aws:sqs:us-east-1:112671578192:GoogleSheetUpdateQueue\" DbName=\"PPPVue\" ProcessedDataCollection=\"GoogleSheet\" GroqModel=\"llama3-70b-8192\""
+parameter_overrides = "BulkImportQueueArn=\"arn:aws:sqs:us-east-1:112671578192:GoogleSheetQueue\" UpdateQueueArn=\"arn:aws:sqs:us-east-1:112671578192:GoogleSheetUpdateQueue\" DbName=\"PPPVue\" ProcessedDataCollection=\"GoogleSheet\" OpenAiModel=\"o4-mini\""
 image_repositories = []

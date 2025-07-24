@@ -1,7 +1,6 @@
 const express = require('express');
 const { google } = require('googleapis');
 const { sendBulkImportMessages } = require('../sqs-service'); 
-const { bulkImportSchema } = require('../utils/validator'); 
 const router = express.Router();
 const User = require('../models/GoogleUsers');
 const GoogleCredential = require('../models/GoogleCredential');
@@ -156,16 +155,34 @@ router.get('/google/callback', async (req, res) => {
                 console.log(`Created new Apps Script project with ID: ${scriptId}`);
 
                    // Step 5: Push your script code from the template file into the new project
-                await script.projects.updateContent({
-                    scriptId: scriptId,
-                    requestBody: {
-                        files: [{
-                            name: 'Code', // The script filename inside the editor
-                            type: 'SERVER_JS',
-                            source: scriptContent // Your script code from the template file
-                        }]
-                    }
-                });
+           await script.projects.updateContent({
+    scriptId: scriptId,
+    requestBody: {
+        files: [
+            {
+                name: 'Code',
+                type: 'SERVER_JS',
+                source: scriptContent
+            },
+            {
+                // ADD THIS ENTIRE OBJECT for the manifest file
+                name: 'appsscript',
+                type: 'JSON',
+                source: JSON.stringify({
+                    "timeZone": "America/New_York", // Or any valid timezone
+                    "dependencies": {},
+                    "exceptionLogging": "STACKDRIVER",
+                    "runtimeVersion": "V8",
+                    "oauthScopes": [ // The scopes the script itself needs to run
+                        "https://www.googleapis.com/auth/spreadsheets",
+                        "https://www.googleapis.com/auth/script.scriptapp",
+                        "https://www.googleapis.com/auth/script.external_request"
+                    ]
+                })
+            }
+        ]
+    }
+});
              // Step 6: Execute the 'setupFromBackend' function to create the onEdit trigger
                 await script.scripts.run({
                     scriptId: scriptId,
