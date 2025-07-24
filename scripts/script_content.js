@@ -202,7 +202,7 @@ function formatDataForSchema(headers, row, rowIndex, userId) {
 
     const input_data = {};
     headers.forEach((header, i) => {
-      const key = header ? header.toString().trim() : \\\`column_\\\${i}\\\`; // <-- FIXED HERE
+      const key = header ? header.toString().trim() : \`column_\${i}\`;
       if (key && key !== '') {
         input_data[key] = row[i] !== undefined ? row[i] : null;
       }
