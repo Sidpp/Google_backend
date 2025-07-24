@@ -1,5 +1,5 @@
 const { SQSClient, SendMessageCommand } = require("@aws-sdk/client-sqs");
-const { bulkImportSchema, updateSchema } = require("../backend-api/utils/validator"); // <-- IMPORTED HERE
+const { bulkImportSchema, updateSchema } = require("./utils/validator");
 
 const sqsClient = new SQSClient({
     region: process.env.AWS_REGION,
