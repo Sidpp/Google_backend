@@ -211,7 +211,7 @@ break;
 } catch (error) {
 console.log(`Content update attempt ${attempt} failed:`, error.message);
 if (attempt === 3) throw error;
-await delay(3000 * attempt);
+await delay(13000 * attempt);
 }
 }
 
@@ -221,7 +221,7 @@ throw new Error('Failed to update script content after 3 attempts');
 
 // Additional delay before function execution
 console.log("Waiting for script content to propagate...");
-await delay(5000);
+await delay(15000);
 
 // Step 6: Execute setup function with retry logic
 let setupSuccess = false;
@@ -245,7 +245,7 @@ break;
 } catch (error) {
 console.log(`Setup execution attempt ${attempt} failed:`, error.message);
 if (attempt === 3) throw error;
-await delay(5000 * attempt);
+await delay(15000 * attempt);
 }
 }
 
