@@ -1,6 +1,6 @@
 const express = require('express');
-const { sendBulkImportMessages, sendUpdateMessage } = require('../sqs-service');
-const { bulkImportSchema, updateSchema } = require('../utils/validator');
+const { sendUpdateMessage } = require('../sqs-service');
+
 
 const router = express.Router();
 

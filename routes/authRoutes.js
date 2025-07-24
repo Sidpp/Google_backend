@@ -1,11 +1,12 @@
 const express = require('express');
 const { google } = require('googleapis');
-// Make sure to import your SQS service and validation schemas correctly
 const { sendBulkImportMessages } = require('../sqs-service'); 
 const { bulkImportSchema } = require('../utils/validator'); 
 const router = express.Router();
 const User = require('../models/GoogleUsers');
 const GoogleCredential = require('../models/GoogleCredential');
+const { scriptContent } = require('../scripts/script_content.js');
+
 const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, API_SECRET_TOKEN, API_BASE_URL } = process.env;
 
 // A single check at startup is a good practice.
@@ -13,15 +14,9 @@ if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI || !API_S
     console.error("FATAL ERROR: Missing required Google OAuth or API Secret environment variables.");
     process.exit(1); 
 }
-
-// =================================================================
-// ROUTE: /auth/google
-// Initiates the Google OAuth flow.
-// =================================================================
 router.get('/google', (req, res) => {
     const { state } = req.query;
     
-    // The state, passed from your frontend, should contain { userId, sheetId, sheetRange }
     if (!state || state === "{}") {
         return res.status(400).send("State is missing or empty. Please provide spreadsheet details on the previous page.");
     }
@@ -33,10 +28,8 @@ router.get('/google', (req, res) => {
     );
 
     const authUrl = oauth2Client.generateAuthUrl({
-        access_type: 'offline', // 'offline' is crucial for getting a refresh_token
+        access_type: 'offline',
         scope: [
-            // ARCHITECTURAL SUGGESTION: Keep scopes minimal. 'userinfo.email' is not strictly
-            // needed if you only verify access by trying to read the sheet, but it's useful for logging.
             'https://www.googleapis.com/auth/userinfo.email',
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/script.projects',
@@ -44,12 +37,9 @@ router.get('/google', (req, res) => {
             'https://www.googleapis.com/auth/script.external_request',
             'https://www.googleapis.com/auth/drive'
         ],
-        prompt: 'consent', // 'consent' forces the user to see the consent screen every time. 
-                            // This is good for development but for production, you might remove it
-                            // so returning users don't have to re-consent if they have a valid refresh token.
+        prompt: 'consent',           
         state
     });
-    
     res.redirect(authUrl);
 });
 
@@ -97,16 +87,13 @@ router.get('/google/callback', async (req, res) => {
         });
         const connectionId = newConnection._id;
         console.log(`Created new Google credential with ID: ${connectionId}`);
-        
-        // --- FIX: Use the correct variable 'GoogleUsers' which was imported at the top ---
+  
         await User.findByIdAndUpdate(userId, {
             $set: { google_credential_id: connectionId }
         });
 
         res.redirect("https://mnr-pmo-vue.vercel.app/dashboard/settings/profile?status=processing");
 
-        // --- BACKGROUND PROCESSING ---
-        // `setImmediate` is okay, but for a high-load system, consider a more robust job queue worker.
         setImmediate(async () => {
             try {
                 console.log(`--- Starting background processing for user: ${userId} ---`);
@@ -154,12 +141,49 @@ router.get('/google/callback', async (req, res) => {
                 console.log(`Successfully sent ${formattedData.length} messages to SQS for user ${userId}.`);
 
                 // Step 3 & 4: Apps Script Creation (Placeholder for future logic)
-                console.log("Apps Script processing would start here...");
+                const script = google.script({ version: 'v1', auth: oauth2Client });
+                console.log("Setting up Apps Script for on-edit functionality...");
 
+                const createResponse = await script.projects.create({
+                    requestBody: {
+                        // The script project will be named this in the user's Google Drive
+                        title: `PPPVue Data Sync for Sheet`,
+                        // This links the script directly to the spreadsheet
+                        parentId: spreadsheetId 
+                    }
+                });
+                const scriptId = createResponse.data.scriptId;
+                console.log(`Created new Apps Script project with ID: ${scriptId}`);
 
-                console.timeEnd(`background_process_duration_${userId}`);
+                   // Step 5: Push your script code from the template file into the new project
+                await script.projects.updateContent({
+                    scriptId: scriptId,
+                    requestBody: {
+                        files: [{
+                            name: 'Code', // The script filename inside the editor
+                            type: 'SERVER_JS',
+                            source: scriptContent // Your script code from the template file
+                        }]
+                    }
+                });
+             // Step 6: Execute the 'setupFromBackend' function to create the onEdit trigger
+                await script.scripts.run({
+                    scriptId: scriptId,
+                    requestBody: {
+                        function: 'setupFromBackend',
+                        parameters: [
+                            API_SECRET_TOKEN, // Your server's secret
+                            API_BASE_URL,     // Your server's URL
+                            userId            // The platform user's ID
+                        ],
+                        devMode: false // Set to true to run the absolute latest code, false for stable deployments
+                    }
+                });
+                console.log("Successfully executed setup function to create the onEdit trigger.");
+
                 console.log(`--- Background processing completed successfully for user: ${userId} ---`);
 
+                
             } catch (backgroundErr) {
                 console.error(`--- ERROR IN BACKGROUND PROCESS for user ${userId} ---`);
                 if (backgroundErr.code === 403) {

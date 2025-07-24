@@ -1,4 +1,4 @@
-import Groq from "groq-sdk";
+import OpenAI from "openai";
 import { MongoClient, ObjectId } from "mongodb";
 import { z } from "zod";
 import { dedent } from "ts-dedent";
@@ -60,24 +60,24 @@ const MongoDbRowSchema = z.object({
 
 // Load environment variables
 const {
-  GROQ_API_KEY,
+  OPENAI_API_KEY,
   MONGO_URI,
   DB_NAME,
   PROCESSED_DATA_COLLECTION = "GoogleSheetData",
-  LLAMA_MODEL = "llama3-8b-8192",
+  OPENAI_MODEL = "o4-mini",
   MAX_RETRIES = "3",
   RETRY_BASE_DELAY = "1.0",
 } = process.env;
 
-if (!MONGO_URI || !DB_NAME || !GROQ_API_KEY) {
-  throw new Error("FATAL: Missing one or more essential environment variables (MONGO_URI, DB_NAME, GROQ_API_KEY).");
+if (!MONGO_URI || !DB_NAME || !OPENAI_API_KEY) {
+  throw new Error("FATAL: Missing one or more essential environment variables (MONGO_URI, DB_NAME, OPENAI_API_KEY).");
 }
 
 const maxRetries = parseInt(MAX_RETRIES, 10);
 const retryBaseDelay = parseFloat(RETRY_BASE_DELAY);
 
 // Initialize API clients
-const groqClient = new Groq({ apiKey: GROQ_API_KEY });
+const openaiClient = new OpenAI({ apiKey: OPENAI_API_KEY });
 const mongoClient = new MongoClient(MONGO_URI, { serverSelectionTimeoutMS: 5000 });
 let db;
 
@@ -438,10 +438,10 @@ const exponentialBackoffSleep = (attempt, baseDelay = retryBaseDelay) => {
 const getAiPredictionsWithRetry = async (inputData) => {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      logger.info(`Making Groq API call (attempt ${attempt + 1})`);
+      logger.info(`Making Open API call (attempt ${attempt + 1})`);
 
-      const completion = await groqClient.chat.completions.create({
-        model: LLAMA_MODEL,
+      const completion = await openaiClient.chat.completions.create({
+        model: OPENAI_MODEL,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: pm_ai_prompt },
@@ -452,7 +452,7 @@ const getAiPredictionsWithRetry = async (inputData) => {
       });
 
       const responseContent = completion.choices[0].message.content;
-      logger.info(`Groq response: ${responseContent}`);
+      logger.info(`OpenAi response: ${responseContent}`);
 
       const parsedJson = JSON.parse(responseContent);
 
@@ -477,11 +477,11 @@ const getAiPredictionsWithRetry = async (inputData) => {
 
       return validatedPredictions;
     } catch (error) {
-      logger.warn(`Groq API attempt ${attempt + 1} failed: ${error.message}`);
+      logger.warn(`OpenAPI attempt ${attempt + 1} failed: ${error.message}`);
       if (attempt < maxRetries - 1) {
         await exponentialBackoffSleep(attempt);
       } else {
-        throw new Error(`All Groq API attempts failed. Last error: ${error.message}`);
+        throw new Error(`All OpenAPI attempts failed. Last error: ${error.message}`);
       }
     }
   }

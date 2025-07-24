@@ -1,12 +1,12 @@
 version = 0.1
 
 [default.deploy.parameters]
-stack_name = "Google-ai-data"
+stack_name = "GoogleData"
 resolve_s3 = true
-s3_prefix = "Google-ai-data"
+s3_prefix = "GoogleData"
 region = "us-east-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 disable_rollback = true
-parameter_overrides = "BulkImportQueueArn=\"arn:aws:sqs:us-east-1:157489952161:sqs1\" UpdateQueueArn=\"arn:aws:sqs:us-east-1:157489952161:sqs2\" DbName=\"PPPVue\" ProcessedDataCollection=\"GoogleSheet\" GroqModel=\"llama3-70b-8192\""
+parameter_overrides = "BulkImportQueueArn=\"arn:aws:sqs:us-east-1:112671578192:GoogleSheetQueue\" UpdateQueueArn=\"arn:aws:sqs:us-east-1:112671578192:GoogleSheetUpdateQueue\" DbName=\"PPPVue\" ProcessedDataCollection=\"GoogleSheet\" OpenAiModel=\"o4-mini\""
 image_repositories = []

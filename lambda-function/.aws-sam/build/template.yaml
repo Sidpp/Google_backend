@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: 'Deploys a Lambda function triggered by two SQS queues to process Google
-  Sheet data using Groq for AI predictions.
+  Sheet data using OpenAI for AI predictions.
 
   '
 Parameters:
@@ -23,21 +23,21 @@ Parameters:
     Type: String
     Description: The name of the collection to store processed data.
     Default: processed_rows
-  GroqApiKey:
+  OpenAiApiKey:
     Type: String
     NoEcho: true
-    Description: The API key for Groq.
-  GroqModel:
+    Description: The API key for OpenAI.
+  OpenAiModel:
     Type: String
-    Description: The model to use for Groq predictions.
-    Default: llama3-8b-8192
+    Description: The model to use for OpenAI predictions.
+    Default: o4-mini
 Resources:
   DataProcessorFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: GoogleSheetDataProcessor
-      Description: Processes Google Sheet data from SQS, enriches it with Groq, and
-        stores it.
+      Description: Processes Google Sheet data from SQS, enriches it with OpenAI,
+        and stores it.
       CodeUri: DataProcessorFunction
       Handler: handler.handler
       Runtime: nodejs20.x
@@ -51,10 +51,10 @@ Resources:
             Ref: DbName
           PROCESSED_DATA_COLLECTION:
             Ref: ProcessedDataCollection
-          GROQ_API_KEY:
-            Ref: GroqApiKey
-          GROQ_MODEL:
-            Ref: GroqModel
+          OPENAI_API_KEY:
+            Ref: OpenAiApiKey
+          OPENAI_MODEL:
+            Ref: OpenAiModel
       Events:
         SQSEventBulk:
           Type: SQS

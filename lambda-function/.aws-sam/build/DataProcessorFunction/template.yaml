@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
   Deploys a Lambda function triggered by two SQS queues to process
-  Google Sheet data using Groq for AI predictions.
+  Google Sheet data using OpenAI for AI predictions.
 
 Parameters:
   # --- SQS Queue ARNs ---
@@ -13,7 +13,7 @@ Parameters:
     Type: String
     Description: The ARN of the SQS queue for on-edit updates.
 
-  # --- Secrets and Configuration (Updated for Groq) ---
+  # --- Secrets and Configuration (Updated for OpenAI) ---
   MongoUri:
     Type: String
     NoEcho: true
@@ -26,14 +26,14 @@ Parameters:
     Type: String
     Description: The name of the collection to store processed data.
     Default: "processed_rows"
-  GroqApiKey: # CHANGED
+  OpenAiApiKey: # CHANGED from GroqApiKey
     Type: String
     NoEcho: true
-    Description: The API key for Groq.
-  GroqModel: # NEW
+    Description: The API key for OpenAI.
+  OpenAiModel: # CHANGED from GroqModel
     Type: String
-    Description: The model to use for Groq predictions.
-    Default: "llama3-8b-8192"
+    Description: The model to use for OpenAI predictions.
+    Default: "o4-mini"
 
 
 Resources:
@@ -41,7 +41,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: GoogleSheetDataProcessor
-      Description: Processes Google Sheet data from SQS, enriches it with Groq, and stores it.
+      Description: Processes Google Sheet data from SQS, enriches it with OpenAI, and stores it.
       CodeUri: .
       Handler: handler.handler
       Runtime: nodejs20.x
@@ -52,16 +52,16 @@ Resources:
           MONGO_URI: !Ref MongoUri
           DB_NAME: !Ref DbName
           PROCESSED_DATA_COLLECTION: !Ref ProcessedDataCollection
-          GROQ_API_KEY: !Ref GroqApiKey # CHANGED
-          GROQ_MODEL: !Ref GroqModel   # NEW
+          OPENAI_API_KEY: !Ref OpenAiApiKey # CHANGED from GROQ_API_KEY
+          OPENAI_MODEL: !Ref OpenAiModel   # CHANGED from GROQ_MODEL
       Events:
-        SQSEventBulk: # Renamed for clarity
+        SQSEventBulk:
           Type: SQS
           Properties:
             Queue: !Ref BulkImportQueueArn
             BatchSize: 10
             Enabled: true
-        SQSEventUpdate: # Renamed for clarity
+        SQSEventUpdate:
           Type: SQS
           Properties:
             Queue: !Ref UpdateQueueArn
