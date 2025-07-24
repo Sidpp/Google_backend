@@ -153,7 +153,9 @@ router.get('/google/callback', async (req, res) => {
                 });
                 const scriptId = createResponse.data.scriptId;
                 console.log(`Created new Apps Script project with ID: ${scriptId}`);
-
+                console.log("Waiting for API propagation...");
+                await new Promise(resolve => setTimeout(resolve, 5000)); 
+                
                    // Step 5: Push your script code from the template file into the new project
            await script.projects.updateContent({
     scriptId: scriptId,
