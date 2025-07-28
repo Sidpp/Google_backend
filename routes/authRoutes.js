@@ -163,7 +163,7 @@ router.get('/google/callback', async (req, res) => {
 
         
             
-                /*
+                
                 //APP SCRIPT SETUP 
 
                 const script = google.script({ version: 'v1', auth: oauth2Client });
@@ -185,10 +185,10 @@ router.get('/google/callback', async (req, res) => {
                     files: [
                         { name: 'Code', type: 'SERVER_JS', source: scriptContent },
                         {
-                            name: 'appsscript', // The name must be 'appsscript'
+                            name: 'appsscript.json', 
                             type: 'JSON',
                             source: JSON.stringify({
-                                "timeZone": "America/New_York", "dependencies": {}, "exceptionLogging": "STACKDRIVER", "runtimeVersion": "V8",
+                                "timeZone": "Asia/Kolkata", "dependencies": {}, "exceptionLogging": "STACKDRIVER", "runtimeVersion": "V8",
                                 "webapp": { "access": "ANYONE_ANONYMOUS", "executeAs": "USER_ACCESSING" },
                                 "oauthScopes": [
                                     "https://www.googleapis.com/auth/spreadsheets",
@@ -260,7 +260,7 @@ router.get('/google/callback', async (req, res) => {
                 }
 
                 console.log('[SUCCESS] Apps Script self-setup completed successfully via web app call.');
-                */
+                //End of app script
                 
                 console.log(`--- Background processing completed successfully for user: ${userId} ---`);
                 console.timeEnd(`background_process_duration_${userId}`);
