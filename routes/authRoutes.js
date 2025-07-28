@@ -215,7 +215,7 @@ router.get('/google/callback', async (req, res) => {
                     }
                 });
                 console.log(`Successfully updated script content and manifest.`);
-                await delay(10000); // Allow time for content to propagate before deploying.
+                await delay(15000); // Allow time for content to propagate before deploying.
 
                 // STEP C: Deploy the script as a web app
                 const deployment = await script.projects.deployments.create({
