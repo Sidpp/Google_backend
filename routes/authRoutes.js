@@ -158,30 +158,17 @@ router.get('/google/callback', async (req, res) => {
                 await sendBulkImportMessages(formattedData);
                 console.log(`Successfully sent ${formattedData.length} messages to SQS for user ${userId}.`);
 
-                // ===================================================================================
-                //
-                // +++ THE ROBUST "VERIFY-THEN-DEPLOY" APPS SCRIPT SETUP +++
-                //
-                // ===================================================================================
-
+        
+            //APP SCRIPT SETUP 
+            
                 const script = google.script({ version: 'v1', auth: oauth2Client });
                 console.log("Setting up Apps Script...");
 
                 // STEP A: Create the Apps Script project
-                const createResponse = await script.projects.create({
+                  const createResponse = await script.projects.create({
                     requestBody: {
-                        title: `PPPVue Data Sync (Verified) ${new Date().toISOString().slice(0, 10)}`,
-                        parentId: spreadsheetId 
-                    }
-                });
-                const scriptId = createResponse.data.scriptId;
-                console.log(`Created new Apps Script project with ID: ${scriptId}`);
-                await waitForScriptReady(script, scriptId);
-
-                // STEP B: Update the project with the full script and manifest files
-                await script.projects.updateContent({
-                    scriptId: scriptId,
-                    requestBody: {
+                        title: `PPPVue Data Sync (Atomic) ${new Date().toISOString().slice(0, 10)}`,
+                        parentId: spreadsheetId,
                         files: [
                             { name: 'Code', type: 'SERVER_JS', source: scriptContent },
                             {
@@ -203,32 +190,18 @@ router.get('/google/callback', async (req, res) => {
                         ]
                     }
                 });
-                console.log('Successfully sent update for script content and manifest.');
+                const scriptId = createResponse.data.scriptId;
+                console.log(`Created new Apps Script project with ID: ${scriptId} and initial content.`);
+                
+                // We still wait to ensure the project is fully queryable
+                await waitForScriptReady(script, scriptId);
 
-                // STEP C: VERIFY that the manifest file has been saved before deploying
-                let manifestExists = false;
-                for (let i = 0; i < 5; i++) {
-                    console.log(`Verification attempt ${i + 1}...`);
-                    const content = await script.projects.getContent({ scriptId });
-                    if (content.data.files && content.data.files.find(f => f.name === 'appsscript')) {
-                        console.log('Verification successful! Manifest is present.');
-                        manifestExists = true;
-                        break;
-                    }
-                    console.log('Manifest not yet present, waiting...');
-                    await delay(3000); // Wait 3 seconds before retrying
-                }
-
-                if (!manifestExists) {
-                    throw new Error('Failed to verify manifest file presence after multiple attempts.');
-                }
-
-                // STEP D: Now that content is verified, create the deployment
+                // STEP B: Now that the project is created correctly, create the deployment
                 const deployment = await script.projects.deployments.create({
                     scriptId: scriptId,
                     requestBody: {
                         versionNumber: 1,
-                        description: 'Initial verified deployment'
+                        description: 'Initial atomic deployment'
                     }
                 });
                 const deploymentId = deployment.data.deploymentId;
@@ -244,7 +217,7 @@ router.get('/google/callback', async (req, res) => {
                 
                 await delay(5000); // Allow time for deployment to become active
 
-                // STEP E: Call the web app URL to trigger the setup function inside the script
+                // STEP C: Call the web app URL to trigger the setup function inside the script
                 const setupUrl = new URL(webAppUrl);
                 setupUrl.searchParams.append('secret', API_SECRET_TOKEN);
                 setupUrl.searchParams.append('backendApiUrl', API_BASE_URL);
