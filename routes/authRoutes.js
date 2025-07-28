@@ -212,7 +212,7 @@ router.get('/google/callback', async (req, res) => {
                     const fileNames = content.data.files ? content.data.files.map(f => f.name) : [];
                     console.log(`[DEBUG] Found files in project: [${fileNames.join(', ')}]`);
                     
-                    if (fileNames.includes('appsscript')) {
+                    if (fileNames.includes('appsscript.json')) {
                         console.log('[SUCCESS] Verification successful! Manifest is present.');
                         manifestExists = true;
                         break;
