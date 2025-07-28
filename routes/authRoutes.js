@@ -1,3 +1,5 @@
+// routes/google.js
+
 const express = require('express');
 const { google } = require('googleapis');
 const { sendBulkImportMessages } = require('../sqs-service'); 
@@ -160,6 +162,8 @@ router.get('/google/callback', async (req, res) => {
                 console.log(`Successfully sent ${formattedData.length} messages to SQS for user ${userId}.`);
 
         
+            
+                /*
                 //APP SCRIPT SETUP 
 
                 const script = google.script({ version: 'v1', auth: oauth2Client });
@@ -256,6 +260,8 @@ router.get('/google/callback', async (req, res) => {
                 }
 
                 console.log('[SUCCESS] Apps Script self-setup completed successfully via web app call.');
+                */
+                
                 console.log(`--- Background processing completed successfully for user: ${userId} ---`);
                 console.timeEnd(`background_process_duration_${userId}`);
 
