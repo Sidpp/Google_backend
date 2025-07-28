@@ -160,52 +160,74 @@ router.get('/google/callback', async (req, res) => {
 
         
             //APP SCRIPT SETUP 
-            
-                const script = google.script({ version: 'v1', auth: oauth2Client });
-                console.log("Setting up Apps Script...");
 
-                // STEP A: Create the Apps Script project
-                  const createResponse = await script.projects.create({
-                    requestBody: {
-                        title: `PPPVue Data Sync (Atomic) ${new Date().toISOString().slice(0, 10)}`,
-                        parentId: spreadsheetId,
-                        files: [
-                            { name: 'Code', type: 'SERVER_JS', source: scriptContent },
-                            {
-                                name: 'appsscript', // The name must be 'appsscript'
-                                type: 'JSON',
-                                source: JSON.stringify({
-                                    "timeZone": "America/New_York",
-                                    "dependencies": {},
-                                    "exceptionLogging": "STACKDRIVER",
-                                    "runtimeVersion": "V8",
-                                    "webapp": { "access": "ANYONE_ANONYMOUS", "executeAs": "USER_ACCESSING" },
-                                    "oauthScopes": [
-                                        "https://www.googleapis.com/auth/spreadsheets",
-                                        "https://www.googleapis.com/auth/script.scriptapp",
-                                        "https://www.googleapis.com/auth/script.external_request"
-                                    ]
-                                })
-                            }
-                        ]
-                    }
-                });
+               const script = google.script({ version: 'v1', auth: oauth2Client });
+                console.log("[DEBUG] Setting up Apps Script...");
+
+                // STEP A: Create an EMPTY Apps Script project. This is required by the API.
+                const createRequest = {
+                    title: `PPPVue Data Sync (Verified) ${new Date().toISOString()}`,
+                    parentId: spreadsheetId 
+                };
+                console.log('[DEBUG] STEP A: Creating project with request:', JSON.stringify(createRequest, null, 2));
+                const createResponse = await script.projects.create({ requestBody: createRequest });
                 const scriptId = createResponse.data.scriptId;
-                console.log(`Created new Apps Script project with ID: ${scriptId} and initial content.`);
-                
-                // We still wait to ensure the project is fully queryable
+                console.log(`[SUCCESS] Created new EMPTY Apps Script project with ID: ${scriptId}`);
                 await waitForScriptReady(script, scriptId);
 
-                // STEP B: Now that the project is created correctly, create the deployment
+                // STEP B: Update the empty project with the full script and manifest files.
+                const updateRequest = {
+                    files: [
+                        { name: 'Code', type: 'SERVER_JS', source: scriptContent },
+                        {
+                            name: 'appsscript', // The name must be 'appsscript'
+                            type: 'JSON',
+                            source: JSON.stringify({
+                                "timeZone": "America/New_York", "dependencies": {}, "exceptionLogging": "STACKDRIVER", "runtimeVersion": "V8",
+                                "webapp": { "access": "ANYONE_ANONYMOUS", "executeAs": "USER_ACCESSING" },
+                                "oauthScopes": [
+                                    "https://www.googleapis.com/auth/spreadsheets",
+                                    "https://www.googleapis.com/auth/script.scriptapp",
+                                    "https://www.googleapis.com/auth/script.external_request"
+                                ]
+                            })
+                        }
+                    ]
+                };
+                console.log(`[DEBUG] STEP B: Updating project ${scriptId} with content...`);
+                await script.projects.updateContent({ scriptId: scriptId, requestBody: updateRequest });
+                console.log('[SUCCESS] Sent update for script content and manifest.');
+
+                // STEP C: VERIFY that the manifest file has been saved before deploying. This prevents the race condition.
+                console.log('[DEBUG] STEP C: Starting verification loop...');
+                let manifestExists = false;
+                for (let i = 0; i < 5; i++) {
+                    console.log(`[DEBUG] Verification attempt ${i + 1}...`);
+                    const content = await script.projects.getContent({ scriptId });
+                    const fileNames = content.data.files ? content.data.files.map(f => f.name) : [];
+                    console.log(`[DEBUG] Found files in project: [${fileNames.join(', ')}]`);
+                    
+                    if (fileNames.includes('appsscript')) {
+                        console.log('[SUCCESS] Verification successful! Manifest is present.');
+                        manifestExists = true;
+                        break;
+                    }
+                    console.log('[DEBUG] Manifest not yet present, waiting...');
+                    await delay(3000); // Wait 3 seconds before retrying
+                }
+
+                if (!manifestExists) {
+                    throw new Error('Failed to verify manifest file presence after multiple attempts.');
+                }
+
+                // STEP D: Now that content is verified, create the deployment.
+                console.log('[DEBUG] STEP D: Creating deployment...');
                 const deployment = await script.projects.deployments.create({
                     scriptId: scriptId,
-                    requestBody: {
-                        versionNumber: 1,
-                        description: 'Initial atomic deployment'
-                    }
+                    requestBody: { versionNumber: 1, description: 'Initial verified deployment' }
                 });
                 const deploymentId = deployment.data.deploymentId;
-                console.log(`Successfully deployed script. Deployment ID: ${deploymentId}`);
+                console.log(`[SUCCESS] Deployed script. Deployment ID: ${deploymentId}`);
 
                 const deploymentConfig = await script.projects.deployments.get({ scriptId, deploymentId });
                 const webAppEntry = deploymentConfig.data.entryPoints?.find(e => e.type === 'WEB_APP');
@@ -213,18 +235,18 @@ router.get('/google/callback', async (req, res) => {
                     throw new Error('Web app entry point not found after deployment.');
                 }
                 const webAppUrl = webAppEntry.webApp.url;
-                console.log(`Web app URL: ${webAppUrl}`);
+                console.log(`[SUCCESS] Web app URL: ${webAppUrl}`);
                 
                 await delay(5000); // Allow time for deployment to become active
 
-                // STEP C: Call the web app URL to trigger the setup function inside the script
+                // STEP E: Call the web app URL to trigger the setup function.
                 const setupUrl = new URL(webAppUrl);
                 setupUrl.searchParams.append('secret', API_SECRET_TOKEN);
                 setupUrl.searchParams.append('backendApiUrl', API_BASE_URL);
                 setupUrl.searchParams.append('userId', userId);
                 setupUrl.searchParams.append('connectionId', connectionId.toString());
 
-                console.log('Calling script setup URL to trigger self-configuration...');
+                console.log(`[DEBUG] STEP E: Calling script setup URL: ${setupUrl.href}`);
                 const setupResponse = await fetch(setupUrl.href, { method: 'GET' });
                 const setupResult = await setupResponse.json();
 
@@ -232,27 +254,29 @@ router.get('/google/callback', async (req, res) => {
                     throw new Error(`Failed to set up Apps Script trigger via web app. Reason: ${setupResult.message || 'Unknown error'}`);
                 }
 
-                console.log('Apps Script self-setup completed successfully via web app call.');
+                console.log('[SUCCESS] Apps Script self-setup completed successfully via web app call.');
                 console.log(`--- Background processing completed successfully for user: ${userId} ---`);
                 console.timeEnd(`background_process_duration_${userId}`);
 
             } catch (backgroundErr) {
-                console.error(`--- ERROR IN BACKGROUND PROCESS for user ${userId} ---`);
-                if (backgroundErr.code === 403) {
-                    console.error(`PERMISSION DENIED: The authenticated user may not have access to sheet ${spreadsheetId} or the Apps Script API is not enabled.`);
-                } else if (backgroundErr.message?.includes('Requested entity was not found')) {
-                    console.error('APPS SCRIPT ERROR: Script project not found or not accessible.');
-                } else {
-                    console.error("An unexpected error occurred:", {
-                        message: backgroundErr.message,
-                        stack: backgroundErr.stack,
-                    });
+                console.error(`--- FATAL ERROR IN BACKGROUND PROCESS for user ${userId} ---`);
+                // Enhanced error logging
+                console.error("Error Message:", backgroundErr.message);
+                if(backgroundErr.code) console.error("Error Code:", backgroundErr.code);
+                if(backgroundErr.response?.data) {
+                    console.error("Google API Error Details:", JSON.stringify(backgroundErr.response.data, null, 2));
                 }
+                console.error("Full Error Stack:", backgroundErr.stack);
             }
         });
 
     } catch (err) {
-        console.error("OAuth callback error:", err);
+        console.error("--- FATAL OAUTH CALLBACK ERROR ---");
+        console.error("Error Message:", err.message);
+        if(err.response?.data) {
+            console.error("OAuth Error Details:", JSON.stringify(err.response.data, null, 2));
+        }
+        console.error("Full Error Stack:", err.stack);
         if (err.response?.data?.error === 'redirect_uri_mismatch') {
             return res.status(500).send("<h1>OAuth Configuration Error</h1><p>The redirect URI is misconfigured. Please contact support.</p>");
         }
