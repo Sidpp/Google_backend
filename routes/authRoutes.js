@@ -8,8 +8,6 @@ const router = express.Router();
 const User = require('../models/GoogleUsers');
 const GoogleCredential = require('../models/GoogleCredential');
 const { scriptContent } = require('../scripts/script_content.js');
-// +++ CHANGE 1: Import required modules for the new method +++
-// You will need a fetch library. If you don't have one, run: npm install node-fetch@2
 const fetch = require('node-fetch');
 const { URL } = require('url');
 
@@ -195,7 +193,7 @@ router.get('/google/callback', async (req, res) => {
                                 source: scriptContent // This uses the code from your script_content_updated artifact
                             },
                             {
-                                name: 'appsscript',
+                                name: 'appsscript.json',
                                 type: 'JSON',
                                 source: JSON.stringify({
                                     "timeZone": "America/New_York",
