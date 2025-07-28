@@ -2,6 +2,7 @@
 
 const express = require('express');
 const { google } = require('googleapis');
+// Assuming sqs-service.js, models/GoogleUsers.js, and models/GoogleCredential.js exist and are correct
 const { sendBulkImportMessages } = require('../sqs-service'); 
 const router = express.Router();
 const User = require('../models/GoogleUsers');
@@ -25,10 +26,10 @@ const waitForScriptReady = async (script, scriptId, maxRetries = 5) => {
     for (let i = 0; i < maxRetries; i++) {
         try {
             await script.projects.get({ scriptId });
-            console.log(`Script project ${scriptId} is ready after ${i + 1} attempts`);
+            console.log(`[DEBUG_LOG] Script project ${scriptId} is ready after ${i + 1} attempts`);
             return true;
         } catch (error) {
-            console.log(`Script not ready, attempt ${i + 1}/${maxRetries}. Waiting...`);
+            console.log(`[DEBUG_LOG] Script not ready, attempt ${i + 1}/${maxRetries}. Waiting...`);
             await delay(2000 * (i + 1));
         }
     }
@@ -98,7 +99,7 @@ router.get('/google/callback', async (req, res) => {
     try {
         const { tokens } = await oauth2Client.getToken(code);
         oauth2Client.setCredentials(tokens);
-        console.log("Successfully retrieved OAuth tokens.");
+        console.log("[DEBUG_LOG] Successfully retrieved OAuth tokens.");
 
         const newConnection = await GoogleCredential.create({
             userId: userId, 
@@ -108,7 +109,7 @@ router.get('/google/callback', async (req, res) => {
             rows: []
         });
         const connectionId = newConnection._id;
-        console.log(`Created new Google credential with ID: ${connectionId}`);
+        console.log(`[DEBUG_LOG] Created new Google credential with ID: ${connectionId}`);
 
         await User.findByIdAndUpdate(userId, {
             $set: { google_credential_id: connectionId }
@@ -118,7 +119,7 @@ router.get('/google/callback', async (req, res) => {
 
         setImmediate(async () => {
             try {
-                console.log(`--- Starting background processing for user: ${userId} ---`);
+                console.log(`--- [DEBUG_LOG] Starting background processing for user: ${userId} ---`);
                 console.time(`background_process_duration_${userId}`);
 
                 // Step 1: Read spreadsheet data
@@ -127,10 +128,10 @@ router.get('/google/callback', async (req, res) => {
                 const rows = sheetResponse.data.values;
 
                 if (!rows || rows.length <= 1) {
-                    console.log(`No data rows found in the sheet for user ${userId}. Process finished.`);
+                    console.log(`[DEBUG_LOG] No data rows found in the sheet for user ${userId}. Process finished.`);
                     return;
                 }
-                console.log(`Found ${rows.length - 1} data rows in the sheet.`);
+                console.log(`[DEBUG_LOG] Found ${rows.length - 1} data rows in the sheet.`);
                 
                 const headers = rows[0];
                 const dataRows = rows.slice(1);
@@ -158,67 +159,82 @@ router.get('/google/callback', async (req, res) => {
 
                 // Step 2: Send to SQS
                 await sendBulkImportMessages(formattedData);
-                console.log(`Successfully sent ${formattedData.length} messages to SQS for user ${userId}.`);
+                console.log(`[DEBUG_LOG] Successfully sent ${formattedData.length} messages to SQS for user ${userId}.`);
 
                 
                 //APP SCRIPT SETUP 
-
+                console.log("[DEBUG_LOG] --- Starting Apps Script Setup ---");
                 const script = google.script({ version: 'v1', auth: oauth2Client });
-                console.log("[DEBUG] Setting up Apps Script...");
 
-                // STEP A: Create an EMPTY Apps Script project. This is required by the API.
+                // STEP A: Create an EMPTY Apps Script project.
                 const createRequest = {
-                    title: `PPPVue Data Sync (Verified) ${new Date().toISOString()}`,
+                    title: `PPPVue Data Sync (Debug) ${new Date().toISOString()}`,
                     parentId: spreadsheetId 
                 };
-                console.log('[DEBUG] STEP A: Creating project with request:', JSON.stringify(createRequest, null, 2));
+                console.log('[DEBUG_LOG] STEP A: Creating project with request:', JSON.stringify(createRequest, null, 2));
                 const createResponse = await script.projects.create({ requestBody: createRequest });
                 const scriptId = createResponse.data.scriptId;
-                console.log(`[SUCCESS] Created new EMPTY Apps Script project with ID: ${scriptId}`);
+                console.log(`[SUCCESS_LOG] Created new EMPTY Apps Script project with ID: ${scriptId}`);
                 await waitForScriptReady(script, scriptId);
 
                 // STEP B: Update the empty project with the full script and manifest files.
+                const manifestObject = {
+                    "timeZone": "Asia/Kolkata",
+                    "dependencies": {},
+                    "exceptionLogging": "STACKDRIVER",
+                    "runtimeVersion": "V8",
+                    "webapp": {
+                        "access": "ANYONE_ANONYMOUS",
+                        "executeAs": "USER_ACCESSING"
+                    },
+                    "oauthScopes": [
+                        "https://www.googleapis.com/auth/spreadsheets",
+                        "https://www.googleapis.com/auth/script.scriptapp",
+                        "https://www.googleapis.com/auth/script.external_request"
+                    ]
+                };
+
                 const updateRequest = {
                     files: [
-                        // Using 'Code.gs' to match standard Apps Script convention.
                         { name: 'Code.gs', type: 'SERVER_JS', source: scriptContent },
                         {
-                            // MODIFICATION: Changed name back to 'appsscript' as requested by the latest error message.
-                            name: 'appsscript', 
+                            name: 'appsscript.json', 
                             type: 'JSON',
-                            source: JSON.stringify({
-                                "timeZone": "Asia/Kolkata", "dependencies": {}, "exceptionLogging": "STACKDRIVER", "runtimeVersion": "V8",
-                                "webapp": { "access": "ANYONE_ANONYMOUS", "executeAs": "USER_ACCESSING" },
-                                "oauthScopes": [
-                                    "https://www.googleapis.com/auth/spreadsheets",
-                                    "https://www.googleapis.com/auth/script.scriptapp",
-                                    "https://www.googleapis.com/auth/script.external_request"
-                                ]
-                            })
+                            source: JSON.stringify(manifestObject)
                         }
                     ]
                 };
-                console.log(`[DEBUG] STEP B: Updating project ${scriptId} with content...`);
-                await script.projects.updateContent({ scriptId: scriptId, requestBody: updateRequest });
-                console.log('[SUCCESS] Sent update for script content and manifest.');
+                
+                console.log(`[DEBUG_LOG] STEP B: Preparing to update project ${scriptId}.`);
+                console.log(`[DEBUG_LOG] Manifest content being sent:`, JSON.stringify(manifestObject, null, 2));
 
-                // STEP C: VERIFY that the manifest file has been saved before deploying. This prevents the race condition.
-                console.log('[DEBUG] STEP C: Starting verification loop...');
+                try {
+                    await script.projects.updateContent({ scriptId: scriptId, requestBody: updateRequest });
+                    console.log('[SUCCESS_LOG] Sent update for script content and manifest.');
+                } catch (updateError) {
+                    console.error("[FATAL_ERROR] Error during STEP B: script.projects.updateContent");
+                    // Log the entire request that failed
+                    console.error("[FATAL_ERROR] Failing Request Body:", JSON.stringify(updateRequest, null, 2));
+                    throw updateError; // Re-throw the error to be caught by the main catch block
+                }
+
+
+                // STEP C: VERIFY that the manifest file has been saved before deploying.
+                console.log('[DEBUG_LOG] STEP C: Starting verification loop...');
                 let manifestExists = false;
                 for (let i = 0; i < 5; i++) {
-                    console.log(`[DEBUG] Verification attempt ${i + 1}...`);
+                    console.log(`[DEBUG_LOG] Verification attempt ${i + 1}...`);
                     const content = await script.projects.getContent({ scriptId });
                     const fileNames = content.data.files ? content.data.files.map(f => f.name) : [];
-                    console.log(`[DEBUG] Found files in project: [${fileNames.join(', ')}]`);
+                    console.log(`[DEBUG_LOG] Found files in project: [${fileNames.join(', ')}]`);
                     
-                    // MODIFICATION: Check for 'appsscript' to match the name in the update request.
-                    if (fileNames.includes('appsscript')) {
-                        console.log('[SUCCESS] Verification successful! Manifest is present.');
+                    if (fileNames.includes('appsscript.json')) {
+                        console.log('[SUCCESS_LOG] Verification successful! Manifest is present.');
                         manifestExists = true;
                         break;
                     }
-                    console.log('[DEBUG] Manifest not yet present, waiting...');
-                    await delay(3000); // Wait 3 seconds before retrying
+                    console.log('[DEBUG_LOG] Manifest not yet present, waiting...');
+                    await delay(3000);
                 }
 
                 if (!manifestExists) {
@@ -226,13 +242,15 @@ router.get('/google/callback', async (req, res) => {
                 }
 
                 // STEP D: Now that content is verified, create the deployment.
-                console.log('[DEBUG] STEP D: Creating deployment...');
-                const deployment = await script.projects.deployments.create({
+                console.log('[DEBUG_LOG] STEP D: Creating deployment...');
+                const deploymentRequest = {
                     scriptId: scriptId,
                     requestBody: { versionNumber: 1, description: 'Initial verified deployment' }
-                });
+                };
+                console.log('[DEBUG_LOG] Deployment request:', JSON.stringify(deploymentRequest, null, 2));
+                const deployment = await script.projects.deployments.create(deploymentRequest);
                 const deploymentId = deployment.data.deploymentId;
-                console.log(`[SUCCESS] Deployed script. Deployment ID: ${deploymentId}`);
+                console.log(`[SUCCESS_LOG] Deployed script. Deployment ID: ${deploymentId}`);
 
                 const deploymentConfig = await script.projects.deployments.get({ scriptId, deploymentId });
                 const webAppEntry = deploymentConfig.data.entryPoints?.find(e => e.type === 'WEB_APP');
@@ -240,9 +258,9 @@ router.get('/google/callback', async (req, res) => {
                     throw new Error('Web app entry point not found after deployment.');
                 }
                 const webAppUrl = webAppEntry.webApp.url;
-                console.log(`[SUCCESS] Web app URL: ${webAppUrl}`);
+                console.log(`[SUCCESS_LOG] Web app URL: ${webAppUrl}`);
                 
-                await delay(5000); // Allow time for deployment to become active
+                await delay(5000);
 
                 // STEP E: Call the web app URL to trigger the setup function.
                 const setupUrl = new URL(webAppUrl);
@@ -251,22 +269,24 @@ router.get('/google/callback', async (req, res) => {
                 setupUrl.searchParams.append('userId', userId);
                 setupUrl.searchParams.append('connectionId', connectionId.toString());
 
-                console.log(`[DEBUG] STEP E: Calling script setup URL: ${setupUrl.href}`);
+                console.log(`[DEBUG_LOG] STEP E: Calling script setup URL: ${setupUrl.href}`);
                 const setupResponse = await fetch(setupUrl.href, { method: 'GET' });
-                const setupResult = await setupResponse.json();
+                const setupResultText = await setupResponse.text(); // Get raw text first
+                console.log(`[DEBUG_LOG] Raw response from setup URL: ${setupResultText}`);
+                const setupResult = JSON.parse(setupResultText);
+
 
                 if (!setupResponse.ok || !setupResult.success) {
                     throw new Error(`Failed to set up Apps Script trigger via web app. Reason: ${setupResult.message || 'Unknown error'}`);
                 }
 
-                console.log('[SUCCESS] Apps Script self-setup completed successfully via web app call.');
+                console.log('[SUCCESS_LOG] Apps Script self-setup completed successfully via web app call.');
                 
-                console.log(`--- Background processing completed successfully for user: ${userId} ---`);
+                console.log(`--- [SUCCESS_LOG] Background processing completed successfully for user: ${userId} ---`);
                 console.timeEnd(`background_process_duration_${userId}`);
 
             } catch (backgroundErr) {
-                console.error(`--- FATAL ERROR IN BACKGROUND PROCESS for user ${userId} ---`);
-                // Enhanced error logging
+                console.error(`--- [FATAL_ERROR] IN BACKGROUND PROCESS for user ${userId} ---`);
                 console.error("Error Message:", backgroundErr.message);
                 if(backgroundErr.code) console.error("Error Code:", backgroundErr.code);
                 if(backgroundErr.response?.data) {
@@ -277,7 +297,7 @@ router.get('/google/callback', async (req, res) => {
         });
 
     } catch (err) {
-        console.error("--- FATAL OAUTH CALLBACK ERROR ---");
+        console.error("--- [FATAL_ERROR] OAUTH CALLBACK ERROR ---");
         console.error("Error Message:", err.message);
         if(err.response?.data) {
             console.error("OAuth Error Details:", JSON.stringify(err.response.data, null, 2));
