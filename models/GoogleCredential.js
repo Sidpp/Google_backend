@@ -4,7 +4,7 @@ const googleCredentialSchema = new mongoose.Schema(
     {
         userId: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: "GoogleUser", // Assuming you have a User model named 'GoogleUser'
+            ref: "GoogleUser",
             required: true,
         },
         spreadsheetId: {
@@ -25,16 +25,7 @@ const googleCredentialSchema = new mongoose.Schema(
                 ref: "GoogleSheetData", 
             },
         ],
-        status: {
-            type: String,
-    enum: ['processing', 'completed', 'failed'],
- default: 'processing',
-        },
-        error: {
-            type: String,
-            required: false, 
-        },
-      },
+    },
     { timestamps: true }
 );
 module.exports = mongoose.model("GoogleCredential", googleCredentialSchema);

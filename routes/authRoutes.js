@@ -112,7 +112,8 @@ router.get('/google/callback', async (req, res) => {
             $set: { google_credential_id: connectionId }
         });
 
-        res.redirect("https://mnr-pmo-vue.vercel.app/dashboard/settings/profile?status=processing");
+        // MODIFICATION: Removed the "?status=processing" query parameter from the redirect URL.
+        res.redirect("https://mnr-pmo-vue.vercel.app/dashboard/settings/profile");
 
         setImmediate(async () => {
             try {
@@ -159,9 +160,9 @@ router.get('/google/callback', async (req, res) => {
                 console.log(`Successfully sent ${formattedData.length} messages to SQS for user ${userId}.`);
 
         
-            //APP SCRIPT SETUP 
+                //APP SCRIPT SETUP 
 
-               const script = google.script({ version: 'v1', auth: oauth2Client });
+                const script = google.script({ version: 'v1', auth: oauth2Client });
                 console.log("[DEBUG] Setting up Apps Script...");
 
                 // STEP A: Create an EMPTY Apps Script project. This is required by the API.
@@ -284,4 +285,4 @@ router.get('/google/callback', async (req, res) => {
     }
 });
 
-module.exports = router;
+module.exports = router; 
