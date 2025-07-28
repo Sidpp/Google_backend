@@ -114,7 +114,6 @@ router.get('/google/callback', async (req, res) => {
             $set: { google_credential_id: connectionId }
         });
 
-        // MODIFICATION: Removed the "?status=processing" query parameter from the redirect URL.
         res.redirect("https://mnr-pmo-vue.vercel.app/dashboard/settings/profile");
 
         setImmediate(async () => {
@@ -161,8 +160,6 @@ router.get('/google/callback', async (req, res) => {
                 await sendBulkImportMessages(formattedData);
                 console.log(`Successfully sent ${formattedData.length} messages to SQS for user ${userId}.`);
 
-        
-            
                 
                 //APP SCRIPT SETUP 
 
@@ -183,9 +180,11 @@ router.get('/google/callback', async (req, res) => {
                 // STEP B: Update the empty project with the full script and manifest files.
                 const updateRequest = {
                     files: [
-                        { name: 'Code', type: 'SERVER_JS', source: scriptContent },
+                        // Using 'Code.gs' to match standard Apps Script convention.
+                        { name: 'Code.gs', type: 'SERVER_JS', source: scriptContent },
                         {
-                            name: 'appsscript.json', 
+                            // MODIFICATION: Changed name back to 'appsscript' as requested by the latest error message.
+                            name: 'appsscript', 
                             type: 'JSON',
                             source: JSON.stringify({
                                 "timeZone": "Asia/Kolkata", "dependencies": {}, "exceptionLogging": "STACKDRIVER", "runtimeVersion": "V8",
@@ -212,7 +211,8 @@ router.get('/google/callback', async (req, res) => {
                     const fileNames = content.data.files ? content.data.files.map(f => f.name) : [];
                     console.log(`[DEBUG] Found files in project: [${fileNames.join(', ')}]`);
                     
-                    if (fileNames.includes('appsscript.json')) {
+                    // MODIFICATION: Check for 'appsscript' to match the name in the update request.
+                    if (fileNames.includes('appsscript')) {
                         console.log('[SUCCESS] Verification successful! Manifest is present.');
                         manifestExists = true;
                         break;
@@ -260,7 +260,6 @@ router.get('/google/callback', async (req, res) => {
                 }
 
                 console.log('[SUCCESS] Apps Script self-setup completed successfully via web app call.');
-                //End of app script
                 
                 console.log(`--- Background processing completed successfully for user: ${userId} ---`);
                 console.timeEnd(`background_process_duration_${userId}`);
@@ -291,4 +290,4 @@ router.get('/google/callback', async (req, res) => {
     }
 });
 
-module.exports = router; 
+module.exports = router;
