@@ -170,70 +170,109 @@ router.get('/google/callback', async (req, res) => {
                 const script = google.script({ version: 'v1', auth: oauth2Client });
                 console.log("Setting up Apps Script by deploying as a web app...");
 
-                // STEP A: Create a new Apps Script project bound to the spreadsheet
-                const createResponse = await script.projects.create({
-                    requestBody: {
-                        title: `PPPVue Data Sync (WebApp) for Sheet ${new Date().toISOString().slice(0, 10)}`,
-                        parentId: spreadsheetId 
-                    }
-                });
-                const scriptId = createResponse.data.scriptId;
-                console.log(`Created new Apps Script project with ID: ${scriptId}`);
-                await waitForScriptReady(script, scriptId); // Wait for project to be accessible
+             // Replace the Apps Script setup section (Step A-D) with this simplified approach:
 
-                // STEP B: Update the script content AND the manifest in one go.
-                // The new manifest includes the 'webapp' configuration needed to make the script a web app.
-                await script.projects.updateContent({
-                    scriptId: scriptId,
-                    requestBody: {
-                        files: [
-                            {
-                                name: 'Code',
-                                type: 'SERVER_JS',
-                                source: scriptContent // This uses the code from your script_content_updated artifact
-                            },
-                            {
-                                 name: 'appsscript',
-                                type: 'JSON',
-                                source: JSON.stringify({
-                                    "timeZone": "America/New_York",
-                                    "dependencies": {},
-                                    "exceptionLogging": "STACKDRIVER",
-                                    "runtimeVersion": "V8",
-                                    "webapp": {
-                                        "access": "ANYONE_ANONYMOUS",
-                                        "executeAs": "USER_ACCESSING"
-                                    },
-                                    "oauthScopes": [
-                                        "https://www.googleapis.com/auth/spreadsheets",
-                                        "https://www.googleapis.com/auth/script.scriptapp",
-                                        "https://www.googleapis.com/auth/script.external_request"
-                                    ]
-                                })
-                            }
-                        ]
-                    }
-                });
-                console.log(`Successfully updated script content and manifest.`);
-                await delay(15000); // Allow time for content to propagate before deploying.
+// STEP A: Create a minimal Apps Script project first
+const createResponse = await script.projects.create({
+    requestBody: {
+        title: `PPPVue Data Sync ${new Date().toISOString().slice(0, 10)}`,
+        parentId: spreadsheetId 
+    }
+});
+const scriptId = createResponse.data.scriptId;
+console.log(`Created new Apps Script project with ID: ${scriptId}`);
+await waitForScriptReady(script, scriptId);
 
-                // STEP C: Deploy the script as a web app
-                const deployment = await script.projects.deployments.create({
-                    scriptId: scriptId,
-                    requestBody: {
-                        versionNumber: 1,
-                        description: 'Initial deployment for backend setup'
-                    }
-                });
-                const deploymentId = deployment.data.deploymentId;
-                const deploymentConfig = await script.projects.deployments.get({
-                    scriptId,
-                    deploymentId
-                });
-                const webAppUrl = deploymentConfig.data.entryPoints.find(e => e.type === 'WEB_APP').webApp.url;
-                console.log(`Successfully deployed script as web app. URL: ${webAppUrl}`);
-                await delay(5000); // Allow time for deployment to become active.
+// STEP B: First update with minimal content
+await script.projects.updateContent({
+    scriptId: scriptId,
+    requestBody: {
+        files: [
+            {
+                name: 'Code',
+                type: 'SERVER_JS',
+                source: 'function doGet() { return ContentService.createTextOutput("Hello"); }'
+            }
+        ]
+    }
+});
+console.log('Created minimal script content');
+await delay(3000);
 
+// STEP C: Create a simple web app deployment first
+const deployment = await script.projects.deployments.create({
+    scriptId: scriptId,
+    requestBody: {
+        versionNumber: 1,
+        description: 'Initial minimal deployment'
+    }
+});
+const deploymentId = deployment.data.deploymentId;
+console.log(`Created deployment with ID: ${deploymentId}`);
+await delay(3000);
+
+// STEP D: Now update with the full content
+await script.projects.updateContent({
+    scriptId: scriptId,
+    requestBody: {
+        files: [
+            {
+                name: 'Code',
+                type: 'SERVER_JS',
+                source: scriptContent
+            },
+            {
+                name: 'appsscript',
+                type: 'JSON',
+                source: `{
+  "timeZone": "America/New_York",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "webapp": {
+    "access": "ANYONE_ANONYMOUS",
+    "executeAs": "USER_ACCESSING"
+  },
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/script.scriptapp",
+    "https://www.googleapis.com/auth/script.external_request"
+  ]
+}`
+            }
+        ]
+    }
+});
+console.log('Updated with full script content and manifest');
+await delay(10000);
+
+// STEP E: Update the deployment
+await script.projects.deployments.update({
+    scriptId: scriptId,
+    deploymentId: deploymentId,
+    requestBody: {
+        versionNumber: 2,
+        description: 'Updated with full functionality'
+    }
+});
+
+// Get the web app URL
+const deploymentConfig = await script.projects.deployments.get({
+    scriptId,
+    deploymentId
+});
+
+const webAppEntry = deploymentConfig.data.entryPoints?.find(e => e.type === 'WEB_APP');
+if (!webAppEntry) {
+    throw new Error('Web app entry point not found');
+}
+
+const webAppUrl = webAppEntry.webApp.url;
+console.log(`Web app URL: ${webAppUrl}`);
+
+// Continue with the setup call as before...
+             
+ await delay(5000); // Allow time for deployment to become active
                 // STEP D: Call the web app URL to trigger the setup function inside the script.
                 // This is the most reliable way to execute the script's setup logic.
                 const setupUrl = new URL(webAppUrl);
