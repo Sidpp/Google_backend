@@ -193,7 +193,7 @@ router.get('/google/callback', async (req, res) => {
                                 source: scriptContent // This uses the code from your script_content_updated artifact
                             },
                             {
-                                name: 'appsscript.json',
+                                 name: 'appsscript',
                                 type: 'JSON',
                                 source: JSON.stringify({
                                     "timeZone": "America/New_York",
