@@ -1,57 +1,98 @@
 const scriptContent = `
-function doGet(e) {
+function doPost(e) {
+  const response = { success: false, message: 'An unknown error occurred.' };
+  
   try {
-    // Authenticate the request from your backend using the secret token
-    const secret = e.parameter.secret;
-    const backendApiUrl = e.parameter.backendApiUrl;
-    const userId = e.parameter.userId;
-    const connectionId = e.parameter.connectionId;
+    // STEP 1: Validate the OAuth2 Access Token from the Authorization header.
+    const authHeader = e.headers['authorization'] || e.headers['Authorization'];
+    if (!authHeader) {
+      throw new Error('Request is missing the Authorization header.');
+    }
 
-    // Add connectionId to the validation check
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      throw new Error('Malformed Authorization header. Expected "Bearer <token>".');
+    }
+
+    // STEP 2: Verify the token with Google's tokeninfo endpoint.
+    const tokenInfoUrl = 'https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=' + token;
+    const tokenInfoResponse = UrlFetchApp.fetch(tokenInfoUrl, { 'muteHttpExceptions': true });
+    const tokenInfo = JSON.parse(tokenInfoResponse.getContentText());
+
+    if (tokenInfo.error) {
+      throw new Error('Token is invalid: ' + (tokenInfo.error_description || tokenInfo.error));
+    }
+
+    // STEP 3: CRITICAL - Ensure the user making the call is the same user who deployed the script.
+    // This prevents unauthorized execution and is the core fix for the 403 error.
+    const effectiveUserEmail = Session.getEffectiveUser().getEmail();
+    const tokenUserEmail = tokenInfo.email;
+
+    if (!effectiveUserEmail || effectiveUserEmail !== tokenUserEmail) {
+      throw new Error('Token validation failed. The calling user (' + tokenUserEmail + ') does not match the script owner (' + effectiveUserEmail + ').');
+    }
+    
+    Logger.log('Token validated successfully for user: ' + effectiveUserEmail);
+
+    // STEP 4: Parse the parameters from the POST body.
+    if (!e.postData || !e.postData.contents) {
+        throw new Error('Request is missing postData.');
+    }
+    const payload = JSON.parse(e.postData.contents);
+    const { secret, backendApiUrl, userId, connectionId } = payload;
+
+    Logger.log('doPost called with parameters: secret=' + (secret ? '[PRESENT]' : '[MISSING]') +
+               ', backendApiUrl=' + (backendApiUrl || '[MISSING]') +
+               ', userId=' + (userId || '[MISSING]') +
+               ', connectionId=' + (connectionId || '[MISSING]'));
+
     if (!secret || !backendApiUrl || !userId || !connectionId) {
-      throw new Error('Missing required parameters: secret, backendApiUrl, userId, or connectionId');
+      throw new Error('Missing required parameters in POST body: secret, backendApiUrl, userId, or connectionId');
     }
     
-    // For security, we'll store the secret on the first run and validate it on subsequent runs
-    const scriptProperties = PropertiesService.getScriptProperties();
-    const initialSecret = scriptProperties.getProperty('API_SECRET_TOKEN');
-
-    // If no secret is stored yet, we trust the one from the backend to set things up
-    if (!initialSecret) {
-       scriptProperties.setProperty('API_SECRET_TOKEN', secret);
-    } else if (initialSecret !== secret) {
-       return ContentService.createTextOutput(JSON.stringify({ 
-         success: false, 
-         message: 'Invalid secret token.' 
-       })).setMimeType(ContentService.MimeType.JSON);
-    }
+    // Store the secret from the backend for later use in onSheetEdit
+    PropertiesService.getScriptProperties().setProperty('API_SECRET_TOKEN', secret);
     
-    // Run the main setup logic, now passing connectionId
+    // STEP 5: Run the main setup logic.
     const setupResult = setup(backendApiUrl, userId, connectionId);
 
     return ContentService.createTextOutput(JSON.stringify(setupResult))
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (error) {
-    Logger.log('Error in doGet: ' + error.toString());
-    return ContentService.createTextOutput(JSON.stringify({ 
-      success: false, 
-      message: error.toString() 
-    })).setMimeType(ContentService.MimeType.JSON);
+    Logger.log('Error in doPost: ' + error.toString() + '\\nStack: ' + error.stack);
+    response.message = 'Internal error: ' + error.toString();
+    response.stack = error.stack; // Include stack for easier debugging
+    return ContentService.createTextOutput(JSON.stringify(response))
+      .setMimeType(ContentService.MimeType.JSON);
   }
 }
 
-/**
- * The main setup logic. Sets properties and creates the on-edit trigger.
- * This is now called by doGet().
- */
+// Your other functions remain unchanged as their logic is sound.
+
+function testSetup() {
+  try {
+    Logger.log('=== MANUAL SETUP TEST ===');
+    const testBackendApiUrl = 'https://your-backend-url.com';
+    const testUserId = 'test-user-id';
+    const testConnectionId = 'test-connection-id';
+    Logger.log('Testing setup with: backendApiUrl=' + testBackendApiUrl +
+               ', userId=' + testUserId + ', connectionId=' + testConnectionId);
+    const result = setup(testBackendApiUrl, testUserId, testConnectionId);
+    Logger.log('Setup test result: ' + JSON.stringify(result));
+    return result;
+  } catch (error) {
+    Logger.log('Error in testSetup: ' + error.toString());
+    return { success: false, message: error.toString() };
+  }
+}
+
 function setup(backendApiUrl, userId, connectionId) {
   try {
-    Logger.log('Starting setup with parameters: backendApiUrl=' + backendApiUrl + 
+    Logger.log('Starting setup with parameters: backendApiUrl=' + backendApiUrl +
                ', userId=' + userId + ', connectionId=' + connectionId);
 
     const scriptProperties = PropertiesService.getScriptProperties();
-    // Store the connectionId along with other properties
     scriptProperties.setProperties({
       'API_BASE_URL': backendApiUrl,
       'PLATFORM_USER_ID': userId,
@@ -66,17 +107,17 @@ function setup(backendApiUrl, userId, connectionId) {
     const sheetId = spreadsheet.getId();
     Logger.log('Working with spreadsheet ID: ' + sheetId);
 
-    // Clean up old triggers to prevent duplicates
     const allTriggers = ScriptApp.getProjectTriggers();
-    for (var i = 0; i < allTriggers.length; i++) {
-      var trigger = allTriggers[i];
+    let deletedCount = 0;
+    allTriggers.forEach(function(trigger) {
       if (trigger.getHandlerFunction() === 'onSheetEdit') {
         ScriptApp.deleteTrigger(trigger);
+        deletedCount++;
         Logger.log('Deleted existing onSheetEdit trigger: ' + trigger.getUniqueId());
       }
-    }
+    });
+    Logger.log('Deleted ' + deletedCount + ' existing triggers');
 
-    // Create the new onEdit trigger
     const newTrigger = ScriptApp.newTrigger('onSheetEdit')
       .forSpreadsheet(sheetId)
       .onEdit()
@@ -84,19 +125,21 @@ function setup(backendApiUrl, userId, connectionId) {
 
     Logger.log('Successfully created new onEdit trigger with ID: ' + newTrigger.getUniqueId());
     
-    // Run a test to confirm properties were set
     const testResult = testConfiguration();
     Logger.log('Configuration test result: ' + JSON.stringify(testResult));
 
     return { 
       success: true, 
       message: 'Setup completed successfully. Trigger created.',
-      testResult: testResult
+      testResult: testResult,
+      triggerId: newTrigger.getUniqueId(),
+      deletedTriggers: deletedCount
     };
 
   } catch (error) {
-    Logger.log('Error in setup: ' + error.toString());
-    throw error; // Re-throw to be caught by doGet
+    Logger.log('Error in setup: ' + error.toString() + '\\nStack: ' + error.stack);
+    // Re-throw the error so the calling function (doPost) can catch it and format the final response
+    throw error;
   }
 }
 
@@ -104,12 +147,19 @@ function onOpen() {
   SpreadsheetApp.getUi()
       .createMenu('API Sync')
       .addItem('Test Configuration', 'showTestConfiguration')
+      .addItem('Manual Setup Test', 'runManualSetupTest')
       .addToUi();
+}
+
+function runManualSetupTest() {
+  const result = testSetup();
+  const message = 'Manual Setup Test Results: ' + JSON.stringify(result, null, 2);
+  SpreadsheetApp.getUi().alert('Setup Test Results', message, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function showTestConfiguration() {
   const result = testConfiguration();
-  const message = 'Configuration Test Results:\\n' + JSON.stringify(result, null, 2);
+  const message = 'Configuration Test Results: ' + JSON.stringify(result, null, 2);
   SpreadsheetApp.getUi().alert('Test Results', message, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
@@ -121,22 +171,35 @@ function testConfiguration() {
     const userId = scriptProperties.getProperty('PLATFORM_USER_ID');
     const connectionId = scriptProperties.getProperty('CONNECTION_ID');
     
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const activeSheet = spreadsheet.getActiveSheet();
+    
+    const allTriggers = ScriptApp.getProjectTriggers();
+    const editTriggers = allTriggers.filter(function(t) { return t.getHandlerFunction() === 'onSheetEdit' });
+    
     return {
       hasToken: !!secretToken,
       hasUrl: !!backendUrl,
       hasUserId: !!userId,
       hasConnectionId: !!connectionId,
-      spreadsheetId: SpreadsheetApp.getActiveSpreadsheet().getId(),
-      sheetName: SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getName()
+      spreadsheetId: spreadsheet.getId(),
+      sheetName: activeSheet.getName(),
+      totalTriggers: allTriggers.length,
+      editTriggers: editTriggers.length,
+      triggerIds: editTriggers.map(function(t) { return t.getUniqueId() })
     };
   } catch (error) {
+    Logger.log('Error in testConfiguration: ' + error.toString());
     return { error: error.toString() };
   }
 }
 
 function onSheetEdit(e) {
   try {
+    Logger.log('onSheetEdit triggered');
+    
     if (!e || !e.range) {
+      Logger.log('No edit event or range provided, skipping');
       return;
     }
     
@@ -146,7 +209,11 @@ function onSheetEdit(e) {
     const userId = scriptProperties.getProperty('PLATFORM_USER_ID');
     const connectionId = scriptProperties.getProperty('CONNECTION_ID');
 
-    // Add connectionId to the validation check
+    Logger.log('Configuration check: token=' + (secretToken ? '[PRESENT]' : '[MISSING]') +
+               ', url=' + (backendUrl || '[MISSING]') +
+               ', userId=' + (userId || '[MISSING]') +
+               ', connectionId=' + (connectionId || '[MISSING]'));
+
     if (!secretToken || !backendUrl || !userId || !connectionId) {
       Logger.log('API configuration, userId, or connectionId is missing, skipping edit sync');
       return;
@@ -159,23 +226,30 @@ function onSheetEdit(e) {
     const startRow = range.getRow();
     const numRows = range.getNumRows();
 
+    Logger.log('Edit detected: sheet=' + sheet.getName() +
+               ', startRow=' + startRow + ', numRows=' + numRows);
+
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     const editedRowsData = sheet.getRange(startRow, 1, numRows, sheet.getLastColumn()).getValues();
+
+    Logger.log('Processing ' + numRows + ' edited rows');
 
     for (var i = 0; i < numRows; i++) {
       const currentRowNumber = startRow + i;
       const currentRowData = editedRowsData[i];
 
       if (currentRowNumber <= 1) {
+        Logger.log('Skipping header row: ' + currentRowNumber);
         continue;
       }
       
-      // Pass the connectionId to the formatting function
       const updatedData = formatDataForSchema(headers, currentRowData, currentRowNumber, userId, connectionId);
       if (!updatedData) {
         Logger.log('Skipping row ' + currentRowNumber + ' as it contains no valid data.');
         continue;
       }
+
+      Logger.log('Sending update for row ' + currentRowNumber + ' with project: ' + updatedData.project_identifier);
 
       const options = {
         'method': 'post',
@@ -185,64 +259,82 @@ function onSheetEdit(e) {
         'muteHttpExceptions': true
       };
 
-      const response = UrlFetchApp.fetch(API_URL_UPDATE, options);
-      Logger.log('Update Send (Row ' + currentRowNumber + '): Response Code ' + response.getResponseCode());
+      try {
+        const response = UrlFetchApp.fetch(API_URL_UPDATE, options);
+        const responseCode = response.getResponseCode();
+        const responseText = response.getContentText();
+        
+        Logger.log('Update Send (Row ' + currentRowNumber + '): Response Code ' + responseCode);
+        Logger.log('Response body: ' + responseText);
+        
+        if (responseCode >= 400) {
+          Logger.log('API request failed for row ' + currentRowNumber + ': ' + responseText);
+        }
+      } catch (fetchError) {
+        Logger.log('HTTP request failed for row ' + currentRowNumber + ': ' + fetchError.toString());
+      }
     }
     
+    Logger.log('onSheetEdit processing completed');
+    
   } catch (error) {
-    Logger.log('Error in onSheetEdit: ' + error.toString());
+    Logger.log('Error in onSheetEdit: ' + error.toString() + '\\nStack: ' + error.stack);
   }
 }
 
 function formatDataForSchema(headers, row, rowIndex, userId, connectionId) {
   try {
     if (!row || !Array.isArray(row)) {
+      Logger.log('Invalid row data for row ' + rowIndex);
       return null;
     }
     
-    // Check if row is completely empty
-    var isEmpty = true;
-    for (var i = 0; i < row.length; i++) {
-      if (row[i] !== "" && row[i] !== null && row[i] !== undefined) {
-        isEmpty = false;
-        break;
-      }
-    }
+    var isEmpty = row.every(function(cell) {
+      return cell === "" || cell === null || cell === undefined;
+    });
+
     if (isEmpty) {
+      Logger.log('Row ' + rowIndex + ' is completely empty, skipping');
       return null;
     }
 
     const input_data = {};
-    for (var i = 0; i < headers.length; i++) {
-      var header = headers[i];
+    headers.forEach(function(header, i) {
       var key = header ? header.toString().trim() : ('column_' + i);
       if (key && key !== '') {
         input_data[key] = row[i] !== undefined ? row[i] : null;
       }
-    }
+    });
 
-    var project = input_data["Project"] || input_data["project"] || input_data["PROJECT"];
+    var project = input_data["Project"] || 
+                  input_data["project"] || 
+                  input_data["PROJECT"] ||
+                  input_data["Project Name"] ||
+                  input_data["project_name"];
+    
     if (!project) {
-      Logger.log('Row ' + rowIndex + ' has no Project identifier, skipping');
+      Logger.log('Row ' + rowIndex + ' has no Project identifier, available keys: ' + Object.keys(input_data).join(', '));
       return null;
     }
 
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     
-    // Add the connectionId to the returned payload
-    return {
+    const payload = {
       connectionId: connectionId,
       userId: userId,
       spreadsheet_id: spreadsheet.getId(),
       sheet_range: spreadsheet.getActiveSheet().getName(),
       row_index: rowIndex,
-      project_identifier: project,
+      project_identifier: project.toString(),
       sync_timestamp: new Date().toISOString(),
       input_data: input_data
     };
     
+    Logger.log('Formatted data for row ' + rowIndex + ': project=' + project);
+    return payload;
+    
   } catch (error) {
-    Logger.log('Error in formatDataForSchema: ' + error.toString());
+    Logger.log('Error in formatDataForSchema for row ' + rowIndex + ': ' + error.toString());
     return null;
   }
 }
