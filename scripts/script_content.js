@@ -1,341 +1,404 @@
 const scriptContent = `
-function doPost(e) {
-  const response = { success: false, message: 'An unknown error occurred.' };
+function onOpen() {
+  // Check activation status
+  const props = PropertiesService.getScriptProperties();
+  const isActivated = props.getProperty('SYNC_ACTIVATED');
+  const pendingActivation = props.getProperty('PENDING_ACTIVATION');
   
+  // Try to complete pending activation when user opens sheet
+  if (pendingActivation === 'true' && !isActivated) {
+    try {
+      Logger.log('Attempting activation on sheet open...');
+      
+      // Try to activate now that user has opened the sheet
+      const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+      
+      // Delete any existing triggers
+      const triggers = ScriptApp.getProjectTriggers();
+      triggers.forEach(trigger => {
+        if (trigger.getHandlerFunction() === 'onSheetEdit') {
+          ScriptApp.deleteTrigger(trigger);
+        }
+      });
+      
+      // Create new trigger
+      ScriptApp.newTrigger('onSheetEdit')
+        .forSpreadsheet(spreadsheet)
+        .onEdit()
+        .create();
+      
+      // Mark as activated and clear pending flag
+      props.setProperty('SYNC_ACTIVATED', 'true');
+      props.setProperty('ACTIVATION_TIMESTAMP', new Date().toISOString());
+      props.deleteProperty('PENDING_ACTIVATION');
+      
+      Logger.log('Activation on sheet open successful!');
+      
+      // Show success message to user
+      SpreadsheetApp.getUi().alert(
+        'Sheet Sync Activated!', 
+        'Your sheet is now automatically syncing with your platform. Any edits will be sent in real-time.',
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+      
+    } catch (activationError) {
+      Logger.log('Activation on open failed: ' + activationError.toString());
+      // Fall back to manual activation menu
+    }
+  }
+  
+  // Show appropriate menu based on current state
+  if (props.getProperty('SYNC_ACTIVATED') === 'true') {
+    // Already activated - show status menu
+    SpreadsheetApp.getUi()
+      .createMenu('Sheet Sync')
+      .addItem('Sync Status: Active ✓', 'showSyncStatus')
+      .addItem('Deactivate Sync', 'deactivateSync')
+      .addToUi();
+  } else {
+    // Not activated yet - show activation menu
+    SpreadsheetApp.getUi()
+      .createMenu('Sheet Sync')
+      .addItem('Activate Sync', 'activateSync')
+      .addToUi();
+  }
+}
+
+/**
+ * Enhanced configuration function with delayed auto-activation
+ */
+function doPost(e) {
   try {
-    // STEP 1: Validate the OAuth2 Access Token from the Authorization header.
-    const authHeader = e.headers['authorization'] || e.headers['Authorization'];
-    if (!authHeader) {
-      throw new Error('Request is missing the Authorization header.');
-    }
-
-    const token = authHeader.split(' ')[1];
-    if (!token) {
-      throw new Error('Malformed Authorization header. Expected "Bearer <token>".');
-    }
-
-    // STEP 2: Verify the token with Google's tokeninfo endpoint.
-    const tokenInfoUrl = 'https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=' + token;
-    const tokenInfoResponse = UrlFetchApp.fetch(tokenInfoUrl, { 'muteHttpExceptions': true });
-    const tokenInfo = JSON.parse(tokenInfoResponse.getContentText());
-
-    if (tokenInfo.error) {
-      throw new Error('Token is invalid: ' + (tokenInfo.error_description || tokenInfo.error));
-    }
-
-    // STEP 3: CRITICAL - Ensure the user making the call is the same user who deployed the script.
-    // This prevents unauthorized execution and is the core fix for the 403 error.
-    const effectiveUserEmail = Session.getEffectiveUser().getEmail();
-    const tokenUserEmail = tokenInfo.email;
-
-    if (!effectiveUserEmail || effectiveUserEmail !== tokenUserEmail) {
-      throw new Error('Token validation failed. The calling user (' + tokenUserEmail + ') does not match the script owner (' + effectiveUserEmail + ').');
-    }
+    Logger.log('=== doPost Called for Configuration ===');
     
-    Logger.log('Token validated successfully for user: ' + effectiveUserEmail);
-
-    // STEP 4: Parse the parameters from the POST body.
     if (!e.postData || !e.postData.contents) {
-        throw new Error('Request is missing postData.');
+      throw new Error('No POST data received for configuration');
     }
+    
     const payload = JSON.parse(e.postData.contents);
-    const { secret, backendApiUrl, userId, connectionId } = payload;
-
-    Logger.log('doPost called with parameters: secret=' + (secret ? '[PRESENT]' : '[MISSING]') +
-               ', backendApiUrl=' + (backendApiUrl || '[MISSING]') +
-               ', userId=' + (userId || '[MISSING]') +
-               ', connectionId=' + (connectionId || '[MISSING]'));
-
+    Logger.log('Payload received: ' + JSON.stringify(payload));
+    
+    const { secret, backendApiUrl, userId, connectionId, autoActivate = false } = payload;
+    
     if (!secret || !backendApiUrl || !userId || !connectionId) {
-      throw new Error('Missing required parameters in POST body: secret, backendApiUrl, userId, or connectionId');
+      throw new Error('Missing required configuration parameters');
     }
     
-    // Store the secret from the backend for later use in onSheetEdit
-    PropertiesService.getScriptProperties().setProperty('API_SECRET_TOKEN', secret);
-    
-    // STEP 5: Run the main setup logic.
-    const setupResult = setup(backendApiUrl, userId, connectionId);
-
-    return ContentService.createTextOutput(JSON.stringify(setupResult))
-      .setMimeType(ContentService.MimeType.JSON);
-
-  } catch (error) {
-    Logger.log('Error in doPost: ' + error.toString() + '\\nStack: ' + error.stack);
-    response.message = 'Internal error: ' + error.toString();
-    response.stack = error.stack; // Include stack for easier debugging
-    return ContentService.createTextOutput(JSON.stringify(response))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-// Your other functions remain unchanged as their logic is sound.
-
-function testSetup() {
-  try {
-    Logger.log('=== MANUAL SETUP TEST ===');
-    const testBackendApiUrl = 'https://your-backend-url.com';
-    const testUserId = 'test-user-id';
-    const testConnectionId = 'test-connection-id';
-    Logger.log('Testing setup with: backendApiUrl=' + testBackendApiUrl +
-               ', userId=' + testUserId + ', connectionId=' + testConnectionId);
-    const result = setup(testBackendApiUrl, testUserId, testConnectionId);
-    Logger.log('Setup test result: ' + JSON.stringify(result));
-    return result;
-  } catch (error) {
-    Logger.log('Error in testSetup: ' + error.toString());
-    return { success: false, message: error.toString() };
-  }
-}
-
-function setup(backendApiUrl, userId, connectionId) {
-  try {
-    Logger.log('Starting setup with parameters: backendApiUrl=' + backendApiUrl +
-               ', userId=' + userId + ', connectionId=' + connectionId);
-
-    const scriptProperties = PropertiesService.getScriptProperties();
-    scriptProperties.setProperties({
+    // Store configuration in script properties
+    const props = PropertiesService.getScriptProperties();
+    props.setProperties({
+      'API_SECRET_TOKEN': secret,
       'API_BASE_URL': backendApiUrl,
       'PLATFORM_USER_ID': userId,
       'CONNECTION_ID': connectionId
     });
-    Logger.log('Successfully set API config, PLATFORM_USER_ID, and CONNECTION_ID.');
-
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    if (!spreadsheet) {
-      throw new Error('Could not access the active spreadsheet');
+    
+    Logger.log('Configuration stored successfully');
+    
+    let response = {
+      success: true,
+      message: 'Apps Script configured successfully.'
+    };
+    
+    // Delayed auto-activation approach
+    if (autoActivate) {
+      try {
+        // Mark for pending activation instead of immediate activation
+        props.setProperty('PENDING_ACTIVATION', 'true');
+        props.setProperty('ACTIVATION_REQUESTED_AT', new Date().toISOString());
+        
+        // Create a time-based trigger to activate after 3 minutes
+        ScriptApp.newTrigger('delayedActivation')
+          .timeBased()
+          .after(3 * 60 * 1000) // 3 minutes delay
+          .create();
+        
+        response.message = 'Apps Script configured successfully. Auto-activation scheduled for 3 minutes.';
+        response.delayedActivation = true;
+        response.activationDelay = '3 minutes';
+        
+        Logger.log('Delayed activation scheduled successfully');
+        
+      } catch (scheduleError) {
+        Logger.log('Failed to schedule delayed activation: ' + scheduleError.toString());
+        response.message = 'Apps Script configured but auto-activation scheduling failed. User must activate manually.';
+        response.delayedActivation = false;
+        response.scheduleError = scheduleError.toString();
+      }
     }
-    const sheetId = spreadsheet.getId();
-    Logger.log('Working with spreadsheet ID: ' + sheetId);
+    
+    return ContentService
+      .createTextOutput(JSON.stringify(response))
+      .setMimeType(ContentService.MimeType.JSON);
+      
+  } catch (error) {
+    Logger.log('Error in doPost: ' + error.toString());
+    
+    const errorResponse = {
+      success: false,
+      message: error.toString()
+    };
+    
+    return ContentService
+      .createTextOutput(JSON.stringify(errorResponse))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
 
-    const allTriggers = ScriptApp.getProjectTriggers();
-    let deletedCount = 0;
-    allTriggers.forEach(function(trigger) {
+/**
+ * Delayed activation function - runs via time-based trigger
+ */
+function delayedActivation() {
+  try {
+    Logger.log('=== Delayed Activation Triggered ===');
+    
+    const props = PropertiesService.getScriptProperties();
+    
+    // Only proceed if activation is still pending
+    if (props.getProperty('PENDING_ACTIVATION') !== 'true') {
+      Logger.log('No pending activation found. Exiting.');
+      return;
+    }
+    
+    // Check if already activated (maybe user did it manually)
+    if (props.getProperty('SYNC_ACTIVATED') === 'true') {
+      Logger.log('Already activated. Cleaning up pending flag.');
+      props.deleteProperty('PENDING_ACTIVATION');
+      return;
+    }
+    
+    Logger.log('Attempting delayed activation...');
+    
+    // Get the spreadsheet (this should work better after the delay)
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // Clean up any existing triggers first
+    const triggers = ScriptApp.getProjectTriggers();
+    triggers.forEach(trigger => {
       if (trigger.getHandlerFunction() === 'onSheetEdit') {
         ScriptApp.deleteTrigger(trigger);
-        deletedCount++;
-        Logger.log('Deleted existing onSheetEdit trigger: ' + trigger.getUniqueId());
       }
     });
-    Logger.log('Deleted ' + deletedCount + ' existing triggers');
-
-    const newTrigger = ScriptApp.newTrigger('onSheetEdit')
-      .forSpreadsheet(sheetId)
+    
+    // Create the edit trigger
+    ScriptApp.newTrigger('onSheetEdit')
+      .forSpreadsheet(spreadsheet)
       .onEdit()
       .create();
-
-    Logger.log('Successfully created new onEdit trigger with ID: ' + newTrigger.getUniqueId());
     
-    const testResult = testConfiguration();
-    Logger.log('Configuration test result: ' + JSON.stringify(testResult));
-
-    return { 
-      success: true, 
-      message: 'Setup completed successfully. Trigger created.',
-      testResult: testResult,
-      triggerId: newTrigger.getUniqueId(),
-      deletedTriggers: deletedCount
-    };
-
+    // Mark as successfully activated
+    props.setProperty('SYNC_ACTIVATED', 'true');
+    props.setProperty('ACTIVATION_TIMESTAMP', new Date().toISOString());
+    props.deleteProperty('PENDING_ACTIVATION');
+    
+    Logger.log('Delayed activation successful!');
+    
+    // Clean up this one-time trigger
+    const currentTriggers = ScriptApp.getProjectTriggers();
+    currentTriggers.forEach(trigger => {
+      if (trigger.getHandlerFunction() === 'delayedActivation') {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
+    
+    Logger.log('Delayed activation trigger cleaned up');
+    
   } catch (error) {
-    Logger.log('Error in setup: ' + error.toString() + '\\nStack: ' + error.stack);
-    // Re-throw the error so the calling function (doPost) can catch it and format the final response
-    throw error;
+    Logger.log('Delayed activation failed: ' + error.toString());
+    
+    // If delayed activation fails, leave the pending flag so user can activate manually
+    const props = PropertiesService.getScriptProperties();
+    props.setProperty('DELAYED_ACTIVATION_ERROR', error.toString());
+    
+    // Clean up the failed trigger anyway
+    const triggers = ScriptApp.getProjectTriggers();
+    triggers.forEach(trigger => {
+      if (trigger.getHandlerFunction() === 'delayedActivation') {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
   }
 }
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-      .createMenu('API Sync')
-      .addItem('Test Configuration', 'showTestConfiguration')
-      .addItem('Manual Setup Test', 'runManualSetupTest')
-      .addToUi();
-}
-
-function runManualSetupTest() {
-  const result = testSetup();
-  const message = 'Manual Setup Test Results: ' + JSON.stringify(result, null, 2);
-  SpreadsheetApp.getUi().alert('Setup Test Results', message, SpreadsheetApp.getUi().ButtonSet.OK);
-}
-
-function showTestConfiguration() {
-  const result = testConfiguration();
-  const message = 'Configuration Test Results: ' + JSON.stringify(result, null, 2);
-  SpreadsheetApp.getUi().alert('Test Results', message, SpreadsheetApp.getUi().ButtonSet.OK);
-}
-
-function testConfiguration() {
+/**
+ * Manual activation function (enhanced with better pending state handling)
+ */
+function activateSync() {
   try {
-    const scriptProperties = PropertiesService.getScriptProperties();
-    const secretToken = scriptProperties.getProperty('API_SECRET_TOKEN');
-    const backendUrl = scriptProperties.getProperty('API_BASE_URL');
-    const userId = scriptProperties.getProperty('PLATFORM_USER_ID');
-    const connectionId = scriptProperties.getProperty('CONNECTION_ID');
+    const props = PropertiesService.getScriptProperties();
     
+    // Check if already activated
+    if (props.getProperty('SYNC_ACTIVATED') === 'true') {
+      SpreadsheetApp.getUi().alert('Already Active', 'Sheet Sync is already active!', SpreadsheetApp.getUi().ButtonSet.OK);
+      return;
+    }
+    
+    // Clean up any pending activation state
+    if (props.getProperty('PENDING_ACTIVATION') === 'true') {
+      props.deleteProperty('PENDING_ACTIVATION');
+      
+      // Also clean up any delayed activation triggers
+      const triggers = ScriptApp.getProjectTriggers();
+      triggers.forEach(trigger => {
+        if (trigger.getHandlerFunction() === 'delayedActivation') {
+          ScriptApp.deleteTrigger(trigger);
+        }
+      });
+    }
+    
+    // Delete any existing edit triggers
+    const triggers = ScriptApp.getProjectTriggers();
+    triggers.forEach(trigger => {
+      if (trigger.getHandlerFunction() === 'onSheetEdit') {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
+
+    // Create the new trigger
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const activeSheet = spreadsheet.getActiveSheet();
+    ScriptApp.newTrigger('onSheetEdit')
+      .forSpreadsheet(spreadsheet)
+      .onEdit()
+      .create();
     
-    const allTriggers = ScriptApp.getProjectTriggers();
-    const editTriggers = allTriggers.filter(function(t) { return t.getHandlerFunction() === 'onSheetEdit' });
+    // Mark as activated
+    props.setProperty('SYNC_ACTIVATED', 'true');
+    props.setProperty('ACTIVATION_TIMESTAMP', new Date().toISOString());
     
-    return {
-      hasToken: !!secretToken,
-      hasUrl: !!backendUrl,
-      hasUserId: !!userId,
-      hasConnectionId: !!connectionId,
-      spreadsheetId: spreadsheet.getId(),
-      sheetName: activeSheet.getName(),
-      totalTriggers: allTriggers.length,
-      editTriggers: editTriggers.length,
-      triggerIds: editTriggers.map(function(t) { return t.getUniqueId() })
-    };
+    Logger.log('Successfully created new onEdit trigger via manual activation');
+
+    SpreadsheetApp.getUi().alert('Success!', 'Sheet Sync is now active. Any edits you make will be synced automatically.', SpreadsheetApp.getUi().ButtonSet.OK);
+
+    // Refresh the menu
+    onOpen();
+
   } catch (error) {
-    Logger.log('Error in testConfiguration: ' + error.toString());
-    return { error: error.toString() };
+    Logger.log('Error in activateSync: ' + error.toString());
+    SpreadsheetApp.getUi().alert('Error', 'Failed to activate sync. Error: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
+/**
+ * Show current sync status
+ */
+function showSyncStatus() {
+  const props = PropertiesService.getScriptProperties();
+  const activationTime = props.getProperty('ACTIVATION_TIMESTAMP');
+  const connectionId = props.getProperty('CONNECTION_ID');
+  
+  const message = \`Sheet Sync Status: ACTIVE ✓
+
+Activated: \${activationTime ? new Date(activationTime).toLocaleString() : 'Unknown'}
+Connection ID: \${connectionId || 'Unknown'}
+
+Your sheet edits are being automatically synced to your platform.\`;
+
+  SpreadsheetApp.getUi().alert('Sync Status', message, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Deactivate sync (removes trigger)
+ */
+function deactivateSync() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert('Confirm Deactivation', 
+    'Are you sure you want to deactivate Sheet Sync? Your edits will no longer be synced automatically.', 
+    ui.ButtonSet.YES_NO);
+  
+  if (response === ui.Button.YES) {
+    try {
+      // Delete triggers
+      const triggers = ScriptApp.getProjectTriggers();
+      triggers.forEach(trigger => {
+        if (trigger.getHandlerFunction() === 'onSheetEdit') {
+          ScriptApp.deleteTrigger(trigger);
+        }
+      });
+      
+      // Update properties
+      const props = PropertiesService.getScriptProperties();
+      props.deleteProperty('SYNC_ACTIVATED');
+      props.deleteProperty('ACTIVATION_TIMESTAMP');
+      
+      ui.alert('Deactivated', 'Sheet Sync has been deactivated.', ui.ButtonSet.OK);
+      
+      // Refresh menu
+      onOpen();
+      
+    } catch (error) {
+      ui.alert('Error', 'Failed to deactivate sync: ' + error.message, ui.ButtonSet.OK);
+    }
+  }
+}
+
+/**
+ * Main sync function - runs on every edit
+ */
 function onSheetEdit(e) {
   try {
-    Logger.log('onSheetEdit triggered');
-    
     if (!e || !e.range) {
-      Logger.log('No edit event or range provided, skipping');
       return;
     }
     
-    const scriptProperties = PropertiesService.getScriptProperties();
-    const secretToken = scriptProperties.getProperty('API_SECRET_TOKEN');
-    const backendUrl = scriptProperties.getProperty('API_BASE_URL');
-    const userId = scriptProperties.getProperty('PLATFORM_USER_ID');
-    const connectionId = scriptProperties.getProperty('CONNECTION_ID');
-
-    Logger.log('Configuration check: token=' + (secretToken ? '[PRESENT]' : '[MISSING]') +
-               ', url=' + (backendUrl || '[MISSING]') +
-               ', userId=' + (userId || '[MISSING]') +
-               ', connectionId=' + (connectionId || '[MISSING]'));
-
-    if (!secretToken || !backendUrl || !userId || !connectionId) {
-      Logger.log('API configuration, userId, or connectionId is missing, skipping edit sync');
+    const props = PropertiesService.getScriptProperties();
+    const secret = props.getProperty('API_SECRET_TOKEN');
+    const apiUrl = props.getProperty('API_BASE_URL');
+    const userId = props.getProperty('PLATFORM_USER_ID');
+    const connectionId = props.getProperty('CONNECTION_ID');
+    
+    if (!secret || !apiUrl || !userId || !connectionId) {
+      Logger.log('Configuration missing. Cannot sync edit.');
       return;
     }
-
-    const API_URL_UPDATE = backendUrl + '/api/update';
     
     const range = e.range;
     const sheet = range.getSheet();
-    const startRow = range.getRow();
-    const numRows = range.getNumRows();
-
-    Logger.log('Edit detected: sheet=' + sheet.getName() +
-               ', startRow=' + startRow + ', numRows=' + numRows);
-
+    const row = range.getRow();
+    
+    // Skip header row edits
+    if (row <= 1) {
+      return;
+    }
+    
+    // Get headers and row data
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const editedRowsData = sheet.getRange(startRow, 1, numRows, sheet.getLastColumn()).getValues();
-
-    Logger.log('Processing ' + numRows + ' edited rows');
-
-    for (var i = 0; i < numRows; i++) {
-      const currentRowNumber = startRow + i;
-      const currentRowData = editedRowsData[i];
-
-      if (currentRowNumber <= 1) {
-        Logger.log('Skipping header row: ' + currentRowNumber);
-        continue;
-      }
-      
-      const updatedData = formatDataForSchema(headers, currentRowData, currentRowNumber, userId, connectionId);
-      if (!updatedData) {
-        Logger.log('Skipping row ' + currentRowNumber + ' as it contains no valid data.');
-        continue;
-      }
-
-      Logger.log('Sending update for row ' + currentRowNumber + ' with project: ' + updatedData.project_identifier);
-
-      const options = {
-        'method': 'post',
-        'contentType': 'application/json',
-        'headers': { 'Authorization': 'Bearer ' + secretToken },
-        'payload': JSON.stringify(updatedData),
-        'muteHttpExceptions': true
-      };
-
-      try {
-        const response = UrlFetchApp.fetch(API_URL_UPDATE, options);
-        const responseCode = response.getResponseCode();
-        const responseText = response.getContentText();
-        
-        Logger.log('Update Send (Row ' + currentRowNumber + '): Response Code ' + responseCode);
-        Logger.log('Response body: ' + responseText);
-        
-        if (responseCode >= 400) {
-          Logger.log('API request failed for row ' + currentRowNumber + ': ' + responseText);
-        }
-      } catch (fetchError) {
-        Logger.log('HTTP request failed for row ' + currentRowNumber + ': ' + fetchError.toString());
-      }
-    }
+    const rowData = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
     
-    Logger.log('onSheetEdit processing completed');
-    
-  } catch (error) {
-    Logger.log('Error in onSheetEdit: ' + error.toString() + '\\nStack: ' + error.stack);
-  }
-}
-
-function formatDataForSchema(headers, row, rowIndex, userId, connectionId) {
-  try {
-    if (!row || !Array.isArray(row)) {
-      Logger.log('Invalid row data for row ' + rowIndex);
-      return null;
-    }
-    
-    var isEmpty = row.every(function(cell) {
-      return cell === "" || cell === null || cell === undefined;
-    });
-
-    if (isEmpty) {
-      Logger.log('Row ' + rowIndex + ' is completely empty, skipping');
-      return null;
-    }
-
     const input_data = {};
-    headers.forEach(function(header, i) {
-      var key = header ? header.toString().trim() : ('column_' + i);
-      if (key && key !== '') {
-        input_data[key] = row[i] !== undefined ? row[i] : null;
+    headers.forEach((header, i) => {
+      const key = header ? header.toString().trim() : 'column_' + i;
+      if (key) {
+        input_data[key] = rowData[i] !== undefined ? rowData[i] : null;
       }
     });
-
-    var project = input_data["Project"] || 
-                  input_data["project"] || 
-                  input_data["PROJECT"] ||
-                  input_data["Project Name"] ||
-                  input_data["project_name"];
     
-    if (!project) {
-      Logger.log('Row ' + rowIndex + ' has no Project identifier, available keys: ' + Object.keys(input_data).join(', '));
-      return null;
-    }
-
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const projectIdentifier = input_data["Project"] || "Unnamed Project";
     
-    const payload = {
+    const updateData = {
       connectionId: connectionId,
       userId: userId,
-      spreadsheet_id: spreadsheet.getId(),
-      sheet_range: spreadsheet.getActiveSheet().getName(),
-      row_index: rowIndex,
-      project_identifier: project.toString(),
+      spreadsheet_id: SpreadsheetApp.getActiveSpreadsheet().getId(),
+      sheet_range: sheet.getName(),
+      row_index: row,
+      project_identifier: projectIdentifier.toString(),
       sync_timestamp: new Date().toISOString(),
       input_data: input_data
     };
     
-    Logger.log('Formatted data for row ' + rowIndex + ': project=' + project);
-    return payload;
+    const options = {
+      method: 'POST',
+      contentType: 'application/json',
+      headers: {
+        'Authorization': 'Bearer ' + secret
+      },
+      payload: JSON.stringify(updateData),
+      muteHttpExceptions: true
+    };
+    
+    UrlFetchApp.fetch(apiUrl + '/api/update', options);
     
   } catch (error) {
-    Logger.log('Error in formatDataForSchema for row ' + rowIndex + ': ' + error.toString());
-    return null;
+    Logger.log('Error in onSheetEdit: ' + error.toString());
   }
 }
 `;
