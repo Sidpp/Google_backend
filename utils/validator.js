@@ -2,11 +2,15 @@ const { z } = require("zod");
 
 const stringToNumber = z.preprocess((val) => {
   if (typeof val === 'string' && val.trim() !== '') {
-    const num = parseFloat(val);
-    return isNaN(num) ? val : num;
+    
+    const cleanedVal = val.replace(/[$,±%]/g, '').trim();
+    if (cleanedVal === '') return null;
+    
+    const num = parseFloat(cleanedVal);
+    return isNaN(num) ? null : num; 
   }
-  return val;
-}, z.number());
+   return val;
+}, z.number().nullable()); 
 
 const inputDataSchema = z.object({
   Project: z.string(),
@@ -17,16 +21,29 @@ const inputDataSchema = z.object({
   "Contract ID": z.any().optional(),
   "Contract Start Date": z.any().optional(),
   "Contract End Date": z.any().optional(),
-  "Contract Ceiling Price": z.any().optional().nullable(),
-  "Contract Target Price": z.any().optional().nullable(),
-  "Actual Contract Spend": z.any().optional().nullable(),
-  "Expiring Soon": z.any().optional(),
+  
+
+  "Contract Ceiling Price": stringToNumber.optional(),
+  "Contract Target Price": stringToNumber.optional(),
+  "Actual Contract Spend": stringToNumber.optional(),
+  
+
   "Resource Name": z.any().optional(),
   Role: z.any().optional(),
-  "Allocated Hours": stringToNumber.optional().nullable(),
+  "Allocated Hours": stringToNumber.optional(),
+  "Actual Hours": stringToNumber.optional(),
+  "Actual Cost": stringToNumber.optional(),
+  "Planned Cost": stringToNumber.optional(),
+
+  "Project Status (RAG)": z.any().optional(), 
+  "Milestone Status": z.any().optional(),
+  Issues: z.any().optional(),
+  Risks: z.any().optional(),
+  "Update Date": z.any().optional(),
+  
+  
 }).passthrough(true);
 
-// FIXED: Schema for individual row messages (what you're actually sending)
 const bulkImportRowSchema = z.object({
   connectionId: z.string(),
   userId: z.string(),
@@ -55,8 +72,8 @@ const updateSchema = z.object({
 });
 
 module.exports = {
-  bulkImportRowSchema,      // For individual row validation
-  bulkImportBatchSchema,    // For batch validation if needed
+  bulkImportRowSchema,     
+  bulkImportBatchSchema,    
   updateSchema,
   inputDataSchema
 };
